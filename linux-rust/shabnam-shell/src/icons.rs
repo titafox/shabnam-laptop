@@ -78,17 +78,26 @@ impl Icons {
 
     /// True when an icon file of this name was found.
     pub fn has(&self, name: &str) -> bool {
-        self.index.contains_key(name)
+        plain_name(name) && self.index.contains_key(name)
     }
 
-    /// The tile for an app, `px` buffer pixels across. `key` identifies the app in the
-    /// cache, `icon` is the desktop file's Icon= value, `label` supplies the fallback letter.
-    pub fn tile(&mut self, key: &str, icon: &str, label: &str, px: u32, fonts: &mut Fonts) -> Rc<Image> {
+    /// The tile for an app, `px` buffer pixels across. `key` identifies the app in the cache,
+    /// `label` supplies the fallback letter. `icon` is an icon name; it may be the path of a
+    /// picture file only when `from_desktop_file` says it is the Icon= value of an installed
+    /// desktop file. Anything a running program can choose (a window's app id) is only ever
+    /// looked up by name among the installed icons, never opened as a path.
+    pub fn tile(&mut self, key: &str, icon: &str, from_desktop_file: bool, label: &str, px: u32, fonts: &mut Fonts) -> Rc<Image> {
         let px = px.clamp(8, 512);
         if let Some(tile) = self.tiles.get(&(key.to_string(), px)) {
             return tile.clone();
         }
-        let path = if icon.starts_with('/') { Some(PathBuf::from(icon)) } else { self.index.get(icon).cloned() };
+        let path = if from_desktop_file && icon.starts_with('/') {
+            Some(PathBuf::from(icon))
+        } else if plain_name(icon) {
+            self.index.get(icon).cloned()
+        } else {
+            None
+        };
         // A damaged icon file must never take the shell down with it.
         // A picture that came out empty (an SVG using something the renderer lacks) counts as none.
         let picture = path
@@ -103,11 +112,16 @@ impl Icons {
     }
 }
 
+/// An icon name that can only be a name: not empty, no directory part, not a hidden file.
+fn plain_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 128 && !name.contains('/') && !name.starts_with('.') && !name.contains('\0')
+}
+
 fn load(path: &Path, px: u32) -> Option<Image> {
+    let data = crate::draw::read_capped(path)?;
     if path.extension().and_then(|e| e.to_str()) != Some("svg") {
-        return Image::load_png(path.to_str()?);
+        return Image::from_png(&data);
     }
-    let data = std::fs::read(path).ok()?;
     let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
     let size = tree.size();
     let scale = px as f32 / size.width().max(size.height()).max(1.0);

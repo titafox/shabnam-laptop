@@ -1,8 +1,8 @@
 // Shabnam desktop. Mod = the Win key.
 // Wallpaper.
-spawn-at-startup "sh" "-c" "awww-daemon >/tmp/awww.log 2>&1 & sleep 1; awww img /usr/share/shabnam/wallpaper.jpg --transition-type none"
+spawn-at-startup "sh" "-c" "awww-daemon >/var/log/shabnam/awww.log 2>&1 & sleep 1; awww img /usr/share/shabnam/wallpaper.jpg --transition-type none"
 // Shelf, launcher and quick settings (restarted if it ever stops while the desktop is up).
-spawn-at-startup "sh" "-c" "while pidof niri-mali >/dev/null; do shabnam-shell >>/tmp/shabnam-shell.log 2>&1; sleep 1; done"
+spawn-at-startup "sh" "-c" "while pidof niri-mali >/dev/null; do shabnam-shell >>/var/log/shabnam/shabnam-shell.log 2>&1; sleep 1; done"
 // Chinese input method: Ctrl+Space switches.
 spawn-at-startup "shabnam-ime"
 
@@ -19,6 +19,10 @@ input {
 prefer-no-csd
 // Shabnam brand colours: deep navy backdrop, teal focus ring.
 layout {
+    // The screen is small (1280x720 after scaling): every window opens full width instead of
+    // side by side. Mod+R cycles a window between half, two thirds and full width.
+    default-column-width { proportion 1.0; }
+    preset-column-widths { proportion 0.5; proportion 0.66667; proportion 1.0; }
     background-color "#061a33"
     focus-ring { width 3; active-color "#12c8c4"; inactive-color "#12364f"; }
 }
@@ -37,11 +41,15 @@ binds {
     Mod+Left { focus-column-left; }
     Mod+Right { focus-column-right; }
     Mod+F { maximize-column; }
-    XF86AudioRaiseVolume  allow-when-locked=true { spawn "shabnam-volume" "up"; }
-    XF86AudioLowerVolume  allow-when-locked=true { spawn "shabnam-volume" "down"; }
-    XF86AudioMute         allow-when-locked=true { spawn "shabnam-volume" "mute"; }
-    XF86MonBrightnessUp   allow-when-locked=true { spawn "shabnam-brightness" "up"; }
-    XF86MonBrightnessDown allow-when-locked=true { spawn "shabnam-brightness" "down"; }
+    Mod+R { switch-preset-column-width; }
+    Mod+Shift+Left { move-column-left; }
+    Mod+Shift+Right { move-column-right; }
+    Mod+Tab { focus-column-right-or-first; }
+    XF86AudioRaiseVolume allow-when-locked=true { spawn "sh" "-c" "shabnam-volume up; shabnam-shell osd volume"; }
+    XF86AudioLowerVolume allow-when-locked=true { spawn "sh" "-c" "shabnam-volume down; shabnam-shell osd volume"; }
+    XF86AudioMute allow-when-locked=true { spawn "sh" "-c" "shabnam-volume mute; shabnam-shell osd volume"; }
+    XF86MonBrightnessUp allow-when-locked=true { spawn "sh" "-c" "shabnam-brightness up; shabnam-shell osd brightness"; }
+    XF86MonBrightnessDown allow-when-locked=true { spawn "sh" "-c" "shabnam-brightness down; shabnam-shell osd brightness"; }
     // Become the Mac's second screen; the same key comes back here.
     Mod+Escape { spawn "sh" "-c" "echo mac > /run/mode; niri msg action quit --skip-confirmation"; }
     Mod+Shift+E { quit; }

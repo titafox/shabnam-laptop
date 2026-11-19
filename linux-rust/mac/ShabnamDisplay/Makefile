@@ -1,7 +1,7 @@
 APP := build/Shabnam Display.app
 INSTALL_DIR ?= $(HOME)/Applications
 
-.PHONY: build app run install icon clean
+.PHONY: build app run install icon test check clean
 
 build:
 	swift build -c release
@@ -19,6 +19,12 @@ install: app
 
 icon:
 	swift scripts/make-icon.swift
+
+test:
+	swift test
+
+check: test
+	python3 scripts/check-strings.py
 
 clean:
 	rm -rf .build build

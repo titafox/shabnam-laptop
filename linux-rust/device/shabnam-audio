@@ -21,10 +21,10 @@ start)
   udevadm trigger --action=add --subsystem-match=sound && udevadm settle
   path "$(want)"
   cd /
-  setsid pipewire       >/tmp/pipewire.log       2>&1 </dev/null &
+  setsid pipewire       >/var/log/shabnam/pipewire.log       2>&1 </dev/null &
   i=0; while [ ! -S "$XDG_RUNTIME_DIR/pipewire-0" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
-  setsid wireplumber    >/tmp/wireplumber.log    2>&1 </dev/null &
-  setsid pipewire-pulse >/tmp/pipewire-pulse.log 2>&1 </dev/null &
+  setsid wireplumber    >/var/log/shabnam/wireplumber.log    2>&1 </dev/null &
+  setsid pipewire-pulse >/var/log/shabnam/pipewire-pulse.log 2>&1 </dev/null &
   setsid "$0" watch >/dev/null 2>&1 </dev/null &
   ;;
 watch)  # internal: follow the headphone jack

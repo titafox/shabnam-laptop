@@ -21,4 +21,39 @@ enum KeyMap {
     /// Linux media key -> macOS system key (play/pause, next, previous).
     // (The laptop keeps its own volume keys: they set its speaker volume.)
     static let mediaKeys: [UInt16: Int] = [164: 16, 163: 17, 165: 18]
+
+    // Linux codes of the keys that can be swapped.
+    static let leftMeta: UInt16 = 125, rightMeta: UInt16 = 126, leftAlt: UInt16 = 56, rightAlt: UInt16 = 100
+
+    /// Applies the user's modifier layout to a Linux key code before it is looked up.
+    /// Default: Win → Command, Alt → Option. Swapped: Win → Option, Alt → Command (the order
+    /// of the keys on a Mac keyboard). Ctrl is always Control. Left stays left, right stays right.
+    static func remap(_ code: UInt16, swapWinAlt: Bool) -> UInt16 {
+        guard swapWinAlt else { return code }
+        switch code {
+        case leftMeta: return leftAlt
+        case leftAlt: return leftMeta
+        case rightMeta: return rightAlt
+        case rightAlt: return rightMeta
+        default: return code
+        }
+    }
+}
+
+/// Pointer and scroll arithmetic, kept apart from event posting so it can be tested.
+enum InputMath {
+    /// Gentle acceleration: slow strokes stay precise, fast strokes cross both screens.
+    /// `speed` is the user's pointer speed multiplier (1 = as designed).
+    static func pointerGain(dx: Int, dy: Int, speed: Double) -> Double {
+        min(1.0 + hypot(Double(dx), Double(dy)) * 0.06, 3.0) * speed
+    }
+
+    /// Scroll lines to post for a wheel delta, carrying the fraction that could not be posted
+    /// yet in `remainder` so slow settings do not lose movement.
+    static func scrollLines(_ delta: Int, speed: Double, reverse: Bool, remainder: inout Double) -> Int32 {
+        let exact = Double(delta * 2) * speed * (reverse ? -1 : 1) + remainder
+        let whole = exact.rounded(.towardZero)
+        remainder = exact - whole
+        return Int32(whole)
+    }
 }

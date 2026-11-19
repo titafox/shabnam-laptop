@@ -98,6 +98,23 @@ fn main() {
     }
     match args.first().map(String::as_str) {
         None => {}
+        // Testing only: asks wpa_supplicant one read-only question through the shell's own
+        // control-interface client and prints the answer (to compare with wpa_cli).
+        Some("test-wpa") if args.len() == 2 => {
+            let command = args[1].to_ascii_uppercase();
+            if !["STATUS", "LIST_NETWORKS", "SCAN_RESULTS", "SCAN"].contains(&command.as_str()) {
+                eprintln!("shabnam-shell: test-wpa takes status, list_networks, scan_results or scan");
+                std::process::exit(2);
+            }
+            match wifi::Ctrl::open().and_then(|ctrl| ctrl.request(&command)) {
+                Some(reply) => print!("{reply}"),
+                None => {
+                    eprintln!("shabnam-shell: no answer from wpa_supplicant");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
         Some(command) if (args.len() == 1 && COMMANDS.contains(&command)) || (args.len() >= 2 && COMMANDS_WITH_TEXT.contains(&command)) => {
             let command = args.join(" ");
             // Hand the command to the running shell.

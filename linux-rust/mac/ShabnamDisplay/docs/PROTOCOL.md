@@ -84,8 +84,11 @@ interleaved** (left, right), no header, no framing. The receiver reads it in 10 
 (1920 bytes) and discards blocks when more than about 120 ms is queued, so delay cannot build
 up. Volume is applied on the receiver.
 
+Where the sender gets the samples from (listening in on the system sound, or taking it away
+from the Mac's own speakers) is a local choice and does not change the stream.
+
 The sound connection is optional and independent: the sender opens it only while the video
-link is up and "Send audio" is on, and re-opens it if it drops.
+link is up and sound is not switched off, and re-opens it if it drops.
 
 ## 5. Connection lifetime
 

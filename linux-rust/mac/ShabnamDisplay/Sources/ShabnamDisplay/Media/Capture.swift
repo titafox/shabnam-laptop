@@ -10,6 +10,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     private let width: Int
     private let height: Int
     private var capturesAudio: Bool
+    private var frameRate: Int
+    private var showsCursor: Bool
     private let onFrame: (CVPixelBuffer, CMTime) -> Void
     private let onAudio: (CMSampleBuffer) -> Void
     private let onFailure: (String) -> Void
@@ -27,7 +29,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// - onFrame: a picture to encode (capture queue).
     /// - onAudio: a buffer of system sound (sound queue).
     /// - onFailure: capture could not start or stopped by itself; called at most once.
-    init(displayID: CGDirectDisplayID, width: Int, height: Int, capturesAudio: Bool,
+    init(displayID: CGDirectDisplayID, width: Int, height: Int, frameRate: Int, showsCursor: Bool, capturesAudio: Bool,
          onFrame: @escaping (CVPixelBuffer, CMTime) -> Void,
          onAudio: @escaping (CMSampleBuffer) -> Void,
          onFailure: @escaping (String) -> Void) {
@@ -35,6 +37,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         self.width = width
         self.height = height
         self.capturesAudio = capturesAudio
+        self.frameRate = frameRate
+        self.showsCursor = showsCursor
         self.onFrame = onFrame
         self.onAudio = onAudio
         self.onFailure = onFailure
@@ -63,10 +67,10 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         let c = SCStreamConfiguration()
         c.width = width
         c.height = height
-        c.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        c.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
         c.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         c.colorMatrix = CGDisplayStream.yCbCrMatrix_ITU_R_709_2
-        c.showsCursor = true
+        c.showsCursor = showsCursor
         c.queueDepth = 3
         // Also take the Mac's sound output, to play on the laptop's speakers.
         c.capturesAudio = capturesAudio
@@ -114,6 +118,18 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
             self.capturesAudio = enabled
             self.stream?.updateConfiguration(self.configuration()) { error in
                 if let error { log("could not change sound capture: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    /// Changes the frame rate cap and whether the pointer is drawn, without restarting the picture.
+    func update(frameRate: Int, showsCursor: Bool) {
+        queue.async {
+            guard !self.stopped, self.frameRate != frameRate || self.showsCursor != showsCursor else { return }
+            self.frameRate = frameRate
+            self.showsCursor = showsCursor
+            self.stream?.updateConfiguration(self.configuration()) { error in
+                if let error { log("could not change the capture settings: \(error.localizedDescription)") }
             }
         }
     }

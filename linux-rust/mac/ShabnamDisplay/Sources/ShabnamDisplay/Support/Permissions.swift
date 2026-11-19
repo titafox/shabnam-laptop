@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 
-/// The two macOS privacy permissions the app depends on.
+/// The macOS privacy permissions the app depends on.
 enum Permissions {
     /// Needed to capture the virtual display (and the system sound).
     static var screenRecordingGranted: Bool { CGPreflightScreenCaptureAccess() }
@@ -23,6 +23,15 @@ enum Permissions {
 
     static func openAccessibilitySettings() {
         open("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+    }
+
+    /// System sound capture has its own list on the same pane ("System Audio Recording Only").
+    /// macOS offers no way to ask whether it is granted; it prompts on first use.
+    static func openAudioRecordingSettings() { openScreenRecordingSettings() }
+
+    /// System Settings → Displays, to arrange the extra screen relative to the Mac's own.
+    static func openDisplaysSettings() {
+        open("x-apple.systempreferences:com.apple.Displays-Settings.extension")
     }
 
     private static func open(_ string: String) {

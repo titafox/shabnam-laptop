@@ -10,6 +10,8 @@ final class AudioSender {
 
     private let lock = NSLock()
     private var link: Link?
+    /// Told how many bytes went out, for the statistics.
+    var onSent: (Int) -> Void = { _ in }
 
     private var current: Link? {
         lock.lock(); defer { lock.unlock() }
@@ -27,6 +29,16 @@ final class AudioSender {
         guard enabled, case .success(let fresh) = Link.open(host: host, port: port, key: key) else { return }
         lock.lock(); link = fresh; lock.unlock()
         log("sound connected")
+    }
+
+    var isUp: Bool { current?.isUp ?? false }
+
+    /// Sends samples that are already in wire format. false if there is no working connection.
+    @discardableResult
+    func send(pcm: Data) -> Bool {
+        guard let link = current, link.isUp, link.send(pcm) else { return false }
+        onSent(pcm.count)
+        return true
     }
 
     func close() {
@@ -52,7 +64,7 @@ final class AudioSender {
                 let ch = Int(list[0].mNumberChannels)
                 for i in 0..<frames { put(i * 2, p[i * ch]); put(i * 2 + 1, p[i * ch + (ch > 1 ? 1 : 0)]) }
             }
-            link.send(out.withUnsafeBufferPointer { Data(buffer: $0) })
+            if link.send(out.withUnsafeBufferPointer { Data(buffer: $0) }) { onSent(out.count * 2) }
         }
     }
 }

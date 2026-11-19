@@ -8,3 +8,5 @@ DerivedData/
 # Pairing keys must never be committed.
 *.key
 key
+# Machine-local signing identity for scripts/bundle.sh (may contain a personal name).
+.codesign-identity

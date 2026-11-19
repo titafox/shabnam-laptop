@@ -11,7 +11,7 @@ case "$1" in
       --ambient-caps -all,+sys_time,+net_bind_service \
       --inh-caps -all,+sys_time,+net_bind_service \
       --bounding-set -all,+sys_time,+net_bind_service --no-new-privs -- \
-      ntp-daemon -c /etc/ntpd-rs/shabnam.toml >/tmp/ntpd-rs.log 2>&1 </dev/null &
+      ntp-daemon -c /etc/ntpd-rs/shabnam.toml >/var/log/shabnam/ntpd-rs.log 2>&1 </dev/null &
     echo $! > $PID ;;
   stop) running && kill "$(cat $PID)"; rm -f $PID ;;
   status) running && ntp-ctl status || { echo "not running"; exit 1; } ;;

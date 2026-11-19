@@ -1,17 +1,24 @@
-//! Wi-Fi, through `wpa_cli -i wlan0` and nothing else (wpa_supplicant runs with update_config=1,
-//! control socket /run/wpa_supplicant). The parsing and checking functions are pure; the talking
-//! happens on a worker thread so the panel never waits for a scan or a connection attempt.
-//! Depends on std only, so `rustc --test src/wifi.rs` checks it on any machine.
+//! Wi-Fi, by talking to wpa_supplicant's control interface directly (the daemon runs with
+//! update_config=1; its socket is /run/wpa_supplicant/wlan0). The parsing and checking functions
+//! are pure; the talking happens on a worker thread so the panel never waits for a scan or a
+//! connection attempt. Depends on std only, so `rustc --test src/wifi.rs` checks it on any machine.
 //!
-//! Network names and passwords reach wpa_cli as separate arguments of a directly started process
-//! (no shell). They are never printed, logged or written to a file here; wpa_supplicant's own
-//! `save_config` is the only thing that stores them.
+//! Network names and passwords travel as datagram text on that socket, never as arguments of a
+//! process (those can be read by other users). They are never printed, logged or written to a
+//! file here; wpa_supplicant's own SAVE_CONFIG is the only thing that stores them.
 
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::net::UnixDatagram;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const IFACE: &str = "wlan0";
+const CTRL_DIR: &str = "/run/wpa_supplicant";
+/// How long the daemon gets to answer one command.
+const REPLY_TIMEOUT: Duration = Duration::from_secs(4);
 /// How long a connection attempt may take before it counts as failed.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const ADDRESS_TIMEOUT: Duration = Duration::from_secs(15);
@@ -233,54 +240,136 @@ pub enum Event {
     Failed,
 }
 
-/// Runs wpa_cli with the given words; what it printed, or None when it could not be run.
-fn cli(args: &[&str]) -> Option<String> {
-    let out = Command::new("wpa_cli").arg("-i").arg(IFACE).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+/// Overwrites a text that held a secret before letting go of it.
+fn wipe(text: String) {
+    let mut bytes = text.into_bytes();
+    bytes.fill(0);
 }
 
-/// For the commands that answer OK or FAIL.
-fn ok(args: &[&str]) -> bool {
-    cli(args).is_some_and(|reply| reply.trim() == "OK")
+static SOCKETS: AtomicU32 = AtomicU32::new(0);
+
+/// A client of wpa_supplicant's control interface: a datagram socket of our own, connected to
+/// the daemon's. Commands travel as datagram text, so nothing secret ever appears in a process's
+/// argument list. Our socket lives in a directory made for it that only this user can enter,
+/// inside the session's runtime directory; both are removed again when the client goes.
+pub struct Ctrl {
+    socket: UnixDatagram,
+    dir: PathBuf,
+    path: PathBuf,
 }
 
-fn status() -> Status {
-    cli(&["status"]).map(|t| parse_status(&t)).unwrap_or_default()
+impl Ctrl {
+    pub fn open() -> Option<Ctrl> {
+        let runtime = std::env::var("XDG_RUNTIME_DIR").ok().filter(|d| d.starts_with('/')).unwrap_or_else(|| "/run/user0".into());
+        let number = SOCKETS.fetch_add(1, Ordering::Relaxed);
+        let dir = PathBuf::from(format!("{runtime}/shabnam-wpa.{}.{number}", std::process::id()));
+        // Left behind by an earlier process with the same id that was killed.
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).ok()?;
+        let path = dir.join("ctrl");
+        let opened = UnixDatagram::bind(&path).and_then(|socket| {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            socket.connect(format!("{CTRL_DIR}/{IFACE}"))?;
+            socket.set_read_timeout(Some(REPLY_TIMEOUT))?;
+            socket.set_write_timeout(Some(REPLY_TIMEOUT))?;
+            Ok(socket)
+        });
+        match opened {
+            Ok(socket) => Some(Ctrl { socket, dir, path }),
+            Err(_) => {
+                let _ = std::fs::remove_file(&path);
+                let _ = std::fs::remove_dir(&dir);
+                None
+            }
+        }
+    }
+
+    /// Sends one command and returns the reply; None when the daemon does not answer in time.
+    /// The command text is never logged: it can contain a password.
+    pub fn request(&self, command: &str) -> Option<String> {
+        self.socket.send(command.as_bytes()).ok()?;
+        let mut buffer = vec![0u8; 64 * 1024];
+        let deadline = Instant::now() + REPLY_TIMEOUT;
+        while Instant::now() < deadline {
+            let length = self.socket.recv(&mut buffer).ok()?;
+            // Lines starting with "<" are event notices, not the reply to a command.
+            if buffer[..length].first() != Some(&b'<') {
+                return Some(String::from_utf8_lossy(&buffer[..length]).into_owned());
+            }
+        }
+        None
+    }
+
+    /// For the commands that answer OK or FAIL.
+    fn ok(&self, command: &str) -> bool {
+        self.request(command).is_some_and(|reply| reply.trim() == "OK")
+    }
+
+    fn status(&self) -> Status {
+        self.request("STATUS").map(|t| parse_status(&t)).unwrap_or_default()
+    }
+
+    fn networks(&self) -> Vec<Known> {
+        self.request("LIST_NETWORKS").map(|t| parse_networks(&t)).unwrap_or_default()
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot { status: self.status(), known: self.networks(), nets: self.request("SCAN_RESULTS").map(|t| parse_scan(&t)).unwrap_or_default() }
+    }
 }
 
-fn networks() -> Vec<Known> {
-    cli(&["list_networks"]).map(|t| parse_networks(&t)).unwrap_or_default()
+impl Drop for Ctrl {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir(&self.dir);
+    }
 }
 
-fn snapshot() -> Snapshot {
-    Snapshot { status: status(), known: networks(), nets: cli(&["scan_results"]).map(|t| parse_scan(&t)).unwrap_or_default() }
+/// The text of the command that gives network `id` its password; None unless the password
+/// passes `valid_passphrase` (so it cannot close the quotes it is put between).
+fn secret_command(id: u32, security: Security, password: &str) -> Option<String> {
+    if !valid_passphrase(password) {
+        return None;
+    }
+    match security {
+        Security::Psk => Some(format!("SET_NETWORK {id} psk \"{password}\"")),
+        Security::Sae => Some(format!("SET_NETWORK {id} sae_password \"{password}\"")),
+        _ => None,
+    }
 }
 
 /// Creates the configuration for a network not connected to before; its id, or None (and no
 /// configuration left behind) when wpa_supplicant refuses any part of it.
-fn add_network(ssid: &[u8], security: Security, password: Option<&str>) -> Option<u32> {
+fn add_network(ctrl: &Ctrl, ssid: &[u8], security: Security, password: Option<&str>) -> Option<u32> {
     if !valid_ssid(ssid) || security == Security::Unsupported {
         return None;
     }
-    let password = match (security, password) {
-        (Security::Open, _) => None,
-        (_, Some(p)) if valid_passphrase(p) => Some(format!("\"{p}\"")),
-        _ => return None,
-    };
-    let id: u32 = cli(&["add_network"])?.lines().last()?.trim().parse().ok()?;
-    let n = id.to_string();
-    let set = |name: &str, value: &str| ok(&["set_network", &n, name, value]);
+    if security != Security::Open && !password.is_some_and(valid_passphrase) {
+        return None;
+    }
+    let id: u32 = ctrl.request("ADD_NETWORK")?.trim().parse().ok()?;
+    let set = |name: &str, value: &str| ctrl.ok(&format!("SET_NETWORK {id} {name} {value}"));
     let mut good = set("ssid", &hex(ssid));
     good = good
-        && match (security, &password) {
-            (Security::Open, _) => set("key_mgmt", "NONE"),
-            (Security::Psk, Some(p)) => set("psk", p),
-            (Security::Sae, Some(p)) => set("key_mgmt", "SAE") && set("ieee80211w", "2") && set("sae_password", p),
-            _ => false,
+        && match security {
+            Security::Open => set("key_mgmt", "NONE"),
+            Security::Psk => true,
+            Security::Sae => set("key_mgmt", "SAE") && set("ieee80211w", "2"),
+            Security::Unsupported => false,
         };
-    good = good && ok(&["enable_network", &n]);
+    if let (true, Some(password)) = (good && security != Security::Open, password) {
+        good = match secret_command(id, security, password) {
+            Some(command) => {
+                let accepted = ctrl.ok(&command);
+                wipe(command);
+                accepted
+            }
+            None => false,
+        };
+    }
+    good = good && ctrl.ok(&format!("ENABLE_NETWORK {id}"));
     if !good {
-        let _ = ok(&["remove_network", &n]);
+        let _ = ctrl.ok(&format!("REMOVE_NETWORK {id}"));
         return None;
     }
     Some(id)
@@ -288,48 +377,54 @@ fn add_network(ssid: &[u8], security: Security, password: Option<&str>) -> Optio
 
 /// Waits until network `id` is fully connected. False on a wrong key (wpa_supplicant then marks
 /// the network TEMP-DISABLED) or when the time is up.
-fn wait_connected(id: u32, limit: Duration) -> bool {
+fn wait_connected(ctrl: &Ctrl, id: u32, limit: Duration) -> bool {
     let deadline = Instant::now() + limit;
     while Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(500));
-        let now = status();
+        let now = ctrl.status();
         if now.connected() && now.id == Some(id) {
             return true;
         }
-        if networks().iter().any(|k| k.id == id && k.temp_disabled) {
+        if ctrl.networks().iter().any(|k| k.id == id && k.temp_disabled) {
             return false;
         }
     }
     false
 }
 
-fn connect(target: Target, notify: &dyn Fn(Event)) {
-    let before = status();
+fn connect(ctrl: &Ctrl, target: Target, notify: &dyn Fn(Event)) {
+    let before = ctrl.status();
     let previous = before.id;
     let (id, added) = match target {
         Target::Known(id) => (id, false),
-        Target::New { ssid, security, password } => match add_network(&ssid, security, password.as_deref()) {
-            Some(id) => (id, true),
-            None => {
-                notify(Event::Failed);
-                return;
+        Target::New { ssid, security, password } => {
+            let id = add_network(ctrl, &ssid, security, password.as_deref());
+            // The password has been handed over (or refused): it is not kept any longer.
+            if let Some(password) = password {
+                wipe(password);
             }
-        },
+            match id {
+                Some(id) => (id, true),
+                None => {
+                    notify(Event::Failed);
+                    return;
+                }
+            }
+        }
     };
     if !added && before.connected() && previous == Some(id) {
         notify(Event::Address(before.ip));
         return;
     }
-    let n = id.to_string();
-    if ok(&["select_network", &n]) && wait_connected(id, CONNECT_TIMEOUT) {
-        // select_network disabled every other network; undo that before the configuration is
+    if ctrl.ok(&format!("SELECT_NETWORK {id}")) && wait_connected(ctrl, id, CONNECT_TIMEOUT) {
+        // SELECT_NETWORK disabled every other network; undo that before the configuration is
         // saved, so the other known networks stay usable.
-        let _ = ok(&["enable_network", "all"]);
+        let _ = ctrl.ok("ENABLE_NETWORK all");
         if added {
-            let _ = ok(&["save_config"]);
+            let _ = ctrl.ok("SAVE_CONFIG");
         }
         notify(Event::Associated);
-        notify(Event::Snapshot(snapshot()));
+        notify(Event::Snapshot(ctrl.snapshot()));
         // A different network: ask the running dhcpcd for a fresh lease.
         let _ = Command::new("dhcpcd").args(["-n", IFACE]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
         let started = Instant::now();
@@ -338,7 +433,7 @@ fn connect(target: Target, notify: &dyn Fn(Event)) {
             std::thread::sleep(Duration::from_millis(500));
             // The old network's address can linger for a moment; give the rebind time to replace it.
             if started.elapsed() >= Duration::from_secs(2) {
-                address = status().ip;
+                address = ctrl.status().ip;
                 if address.is_some() {
                     break;
                 }
@@ -347,18 +442,17 @@ fn connect(target: Target, notify: &dyn Fn(Event)) {
         notify(Event::Address(address));
     } else {
         if added {
-            let _ = ok(&["remove_network", &n]);
+            let _ = ctrl.ok(&format!("REMOVE_NETWORK {id}"));
         }
         if let Some(previous) = previous.filter(|p| *p != id) {
-            let p = previous.to_string();
-            if ok(&["select_network", &p]) {
-                wait_connected(previous, ADDRESS_TIMEOUT);
+            if ctrl.ok(&format!("SELECT_NETWORK {previous}")) {
+                wait_connected(ctrl, previous, ADDRESS_TIMEOUT);
             }
         }
-        let _ = ok(&["enable_network", "all"]);
+        let _ = ctrl.ok("ENABLE_NETWORK all");
         notify(Event::Failed);
     }
-    notify(Event::Snapshot(snapshot()));
+    notify(Event::Snapshot(ctrl.snapshot()));
 }
 
 /// Starts the worker thread. Requests go in through the returned sender; `notify` is called on
@@ -367,17 +461,31 @@ pub fn start(notify: impl Fn(Event) + Send + 'static) -> mpsc::Sender<Request> {
     let (sender, requests) = mpsc::channel::<Request>();
     std::thread::spawn(move || {
         for request in requests {
+            // A client per request: nothing stays open (or on disk) while the panel is idle.
+            let Some(ctrl) = Ctrl::open() else {
+                match request {
+                    Request::Refresh => notify(Event::Snapshot(Snapshot::default())),
+                    Request::Scan => notify(Event::ScanDone),
+                    Request::Connect(target) => {
+                        if let Target::New { password: Some(password), .. } = target {
+                            wipe(password);
+                        }
+                        notify(Event::Failed);
+                    }
+                }
+                continue;
+            };
             match request {
-                Request::Refresh => notify(Event::Snapshot(snapshot())),
+                Request::Refresh => notify(Event::Snapshot(ctrl.snapshot())),
                 Request::Scan => {
-                    let _ = cli(&["scan"]);
+                    let _ = ctrl.request("SCAN");
                     for _ in 0..3 {
                         std::thread::sleep(Duration::from_millis(1500));
-                        notify(Event::Snapshot(snapshot()));
+                        notify(Event::Snapshot(ctrl.snapshot()));
                     }
                     notify(Event::ScanDone);
                 }
-                Request::Connect(target) => connect(target, &notify),
+                Request::Connect(target) => connect(&ctrl, target, &notify),
             }
         }
     });
@@ -448,6 +556,11 @@ mod tests {
         assert!(!valid_passphrase("line\nbreak12"));
         assert!(valid_passphrase("密码密")); // 9 bytes
         assert!(!valid_passphrase("密码")); // 6 bytes
+        assert_eq!(secret_command(3, Security::Psk, "correct horse").as_deref(), Some("SET_NETWORK 3 psk \"correct horse\""));
+        assert_eq!(secret_command(3, Security::Sae, "correct horse").as_deref(), Some("SET_NETWORK 3 sae_password \"correct horse\""));
+        assert!(secret_command(3, Security::Psk, "bad\" psk x").is_none());
+        assert!(secret_command(3, Security::Psk, "line\nSELECT_NETWORK 9").is_none());
+        assert!(secret_command(3, Security::Open, "12345678").is_none());
         assert!(valid_ssid(b"a") && !valid_ssid(b"") && !valid_ssid(&[b'a'; 33]));
     }
 }

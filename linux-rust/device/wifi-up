@@ -9,7 +9,7 @@ for name in wificond wpa_supplicant dhcpcd; do
 done
 sleep 1
 ip link set wlan0 up
-wpa_supplicant -B -D nl80211 -i wlan0 -c $CONF -P /run/wpa-wlan0.pid >/tmp/wpa.log 2>&1 || { echo "could not start the Wi-Fi program; see /tmp/wpa.log" >&2; exit 1; }
+wpa_supplicant -B -D nl80211 -i wlan0 -c $CONF -P /run/wpa-wlan0.pid >/var/log/shabnam/wpa.log 2>&1 || { echo "could not start the Wi-Fi program; see /var/log/shabnam/wpa.log" >&2; exit 1; }
 i=0
 while [ $i -lt 20 ]; do
   wpa_cli -i wlan0 status 2>/dev/null | grep -q '^wpa_state=COMPLETED' && break

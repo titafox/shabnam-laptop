@@ -30,6 +30,10 @@ final class InputInjector {
     private var dx = 0, dy = 0, wheel = 0, hwheel = 0
     private var lastClick = (at: Date.distantPast, where_: CGPoint.zero, button: UInt16(0), count: 0)
     private var warned = false
+    private var scrollRemainder = 0.0, hscrollRemainder = 0.0
+
+    /// The user's input settings. May be changed between records.
+    var options = InputOptions()
 
     /// One record from the laptop. Motion is collected until the sync record that ends the batch.
     func handle(type: UInt16, code: UInt16, value: Int32) {
@@ -38,7 +42,7 @@ final class InputInjector {
             log("input arrived but the Accessibility permission is missing: System Settings > Privacy & Security > Accessibility")
         }
         switch type {
-        case 1: code >= 0x110 && code <= 0x117 ? button(code, value != 0) : key(code, value)
+        case 1: code >= 0x110 && code <= 0x117 ? button(code, value != 0) : key(KeyMap.remap(code, swapWinAlt: options.swapWinAlt), value)
         case 2:
             switch code {
             case 0: dx += Int(value)
@@ -60,8 +64,12 @@ final class InputInjector {
         e?.cgEvent?.post(tap: .cghidEventTap)
     }
 
+    /// `code` is already in the user's layout (see `KeyMap.remap`).
     private func key(_ code: UInt16, _ value: Int32) {
-        if let m = KeyMap.mediaKeys[code] { media(m, value != 0); return }
+        if let m = KeyMap.mediaKeys[code] {
+            if options.mediaKeys { media(m, value != 0) }
+            return
+        }
         guard let vk = KeyMap.keys[code] else { return }
         if let f = KeyMap.modifierFlags[code] {
             if value == 2 { return }
@@ -121,9 +129,7 @@ final class InputInjector {
     private func flush() {
         if dx != 0 || dy != 0 {
             syncPosition()
-            // Gentle acceleration: slow strokes stay precise, fast strokes cross both screens.
-            let speed = hypot(Double(dx), Double(dy))
-            let gain = min(1.0 + speed * 0.06, 3.0)
+            let gain = InputMath.pointerGain(dx: dx, dy: dy, speed: options.pointerSpeed)
             var p = CGPoint(x: pos.x + Double(dx) * gain, y: pos.y + Double(dy) * gain)
             // Keep the pointer on some display: if the full move leaves all of them, try each axis alone.
             var n: UInt32 = 0
@@ -137,7 +143,10 @@ final class InputInjector {
             dx = 0; dy = 0
         }
         if wheel != 0 || hwheel != 0 {
-            if let e = CGEvent(scrollWheelEvent2Source: src, units: .line, wheelCount: 2, wheel1: Int32(wheel * 2), wheel2: Int32(hwheel * 2), wheel3: 0) {
+            let lines = InputMath.scrollLines(wheel, speed: options.scrollSpeed, reverse: options.reverseScroll, remainder: &scrollRemainder)
+            let columns = InputMath.scrollLines(hwheel, speed: options.scrollSpeed, reverse: options.reverseScroll, remainder: &hscrollRemainder)
+            if lines != 0 || columns != 0,
+               let e = CGEvent(scrollWheelEvent2Source: src, units: .line, wheelCount: 2, wheel1: lines, wheel2: columns, wheel3: 0) {
                 e.flags = flags
                 e.post(tap: .cghidEventTap)
             }

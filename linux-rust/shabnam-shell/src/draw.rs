@@ -151,6 +151,32 @@ impl<'a> Canvas<'a> {
     }
 }
 
+/// No picture file larger than this is read.
+pub const MAX_FILE: u64 = 4 * 1024 * 1024;
+/// No bitmap wider or taller than this is decoded.
+pub const MAX_SIDE: u32 = 2048;
+
+/// The contents of a picture file, provided it is an ordinary file (not a pipe or a device, which
+/// could make the read hang or never end) of at most `MAX_FILE` bytes.
+pub fn read_capped(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let before = std::fs::metadata(path).ok()?;
+    if !before.file_type().is_file() || before.len() > MAX_FILE {
+        return None;
+    }
+    // Checked again on the opened file: the name could have been pointed elsewhere meanwhile.
+    // O_NONBLOCK keeps the open itself from waiting should it now be a pipe.
+    let file = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.file_type().is_file() || meta.len() > MAX_FILE {
+        return None;
+    }
+    let mut data = Vec::with_capacity(meta.len() as usize);
+    file.take(MAX_FILE + 1).read_to_end(&mut data).ok()?;
+    (data.len() as u64 <= MAX_FILE).then_some(data)
+}
+
 /// Premultiplied RGBA picture.
 pub struct Image {
     pub w: u32,
@@ -159,10 +185,21 @@ pub struct Image {
 }
 
 impl Image {
+    /// Reads and decodes a PNG file, within the limits of `read_capped` and `from_png`.
     pub fn load_png(path: &str) -> Option<Image> {
-        let mut decoder = png::Decoder::new(std::fs::File::open(path).ok()?);
+        Image::from_png(&read_capped(Path::new(path))?)
+    }
+
+    /// Decodes PNG data. Pictures larger than `MAX_SIDE` in either direction are refused before
+    /// any memory is set aside for their pixels.
+    pub fn from_png(data: &[u8]) -> Option<Image> {
+        let mut decoder = png::Decoder::new(data);
         decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
         let mut reader = decoder.read_info().ok()?;
+        let (width, height) = (reader.info().width, reader.info().height);
+        if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
+            return None;
+        }
         let mut buf = vec![0; reader.output_buffer_size()];
         let info = reader.next_frame(&mut buf).ok()?;
         let n = (info.width * info.height) as usize;

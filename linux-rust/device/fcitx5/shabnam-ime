@@ -12,4 +12,4 @@ unset GTK_IM_MODULE QT_IM_MODULE
   dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --nopidfile --fork
 }
 # -r takes over from an older copy (one left from before the desktop was restarted).
-exec fcitx5 -r >/tmp/fcitx5.log 2>&1
+exec fcitx5 -r >/var/log/shabnam/fcitx5.log 2>&1

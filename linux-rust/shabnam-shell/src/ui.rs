@@ -630,7 +630,7 @@ impl Ui {
             if self.shelf_hover == Some(ShelfHit::Item(i)) {
                 c.rrect(*x, 4.0, 44.0, 44.0, 12.0, HOVER);
             }
-            let tile = self.icons.tile(&item.key, &item.icon, &item.label, icon_px, &mut self.fonts);
+            let tile = self.icons.tile(&item.key, &item.icon, item.app.is_some(), &item.label, icon_px, &mut self.fonts);
             c.image(x + 5.0, 9.0, &tile);
             if !item.windows.is_empty() {
                 let (width, color) = if item.focused { (14.0, ACCENT) } else { (5.0, TEXT2) };
@@ -1027,7 +1027,7 @@ impl Ui {
                 Target::Url(url) => (String::new(), String::new(), format!("{} {url}", self.t("打开网址", "Open"))),
             };
             if entry.cell {
-                let tile = self.icons.tile(&key, &icon, &label, cell_px, &mut self.fonts);
+                let tile = self.icons.tile(&key, &icon, true, &label, cell_px, &mut self.fonts);
                 c.image(ex + (ew - 44.0) / 2.0, ey + 9.0, &tile);
                 c.text_centered(&mut self.fonts, &label, ex + ew / 2.0, ey + 9.0 + 44.0 + 6.0 + 8.0, 11.5, ew - 6.0, TEXT);
             } else {
@@ -1035,7 +1035,7 @@ impl Ui {
                     c.circle(ex + 10.0 + 17.0, ey + 24.0, 17.0, ACCENT);
                     c.text_centered(&mut self.fonts, "↗", ex + 27.0, ey + 24.0, 17.0, 34.0, ON_ACCENT);
                 } else {
-                    let tile = self.icons.tile(&key, &icon, &label, row_px, &mut self.fonts);
+                    let tile = self.icons.tile(&key, &icon, true, &label, row_px, &mut self.fonts);
                     c.image(ex + 10.0, ey + 7.0, &tile);
                 }
                 let label = self.fonts.fit(&label, 14.0, ew - 56.0 - 12.0);

@@ -8,8 +8,11 @@ import VideoToolbox
 final class Encoder {
     private let session: VTCompressionSession
     private let output: (Data) -> Void
+    private let onDrop: () -> Void
 
-    init?(width: Int, height: Int, output: @escaping (Data) -> Void) {
+    /// - output: one encoded frame, ready for the socket.
+    /// - onDrop: the encoder gave up on a frame (it could not keep up, or failed).
+    init?(width: Int, height: Int, quality: QualityPreset, frameRate: Int, output: @escaping (Data) -> Void, onDrop: @escaping () -> Void = {}) {
         var created: VTCompressionSession?
         let r = VTCompressionSessionCreate(allocator: nil, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_H264,
                                            encoderSpecification: nil, imageBufferAttributes: nil, compressedDataAllocator: nil,
@@ -22,24 +25,37 @@ final class Encoder {
         VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
         VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse) // no B-frames: no added delay
         VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 3600 as CFNumber)
-        // The cable carries about 300 Mbit/s, so spend bits freely: a high rate target, and a ceiling
-        // on how coarsely any frame may be quantised (lower = sharper) so text stays crisp in motion.
-        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: 120_000_000 as CFNumber)
-        let qp = VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: 18 as CFNumber)
-        log("quality ceiling (max QP 18): \(qp == 0 ? "on" : "not supported, status \(qp)")")
-        VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: 60 as CFNumber)
-        VTCompressionSessionPrepareToEncodeFrames(s)
         session = s
         self.output = output
+        self.onDrop = onDrop
+        apply(quality: quality, frameRate: frameRate)
+        VTCompressionSessionPrepareToEncodeFrames(s)
+    }
+
+    /// Sets the bit budget and the frame rate the encoder plans for. May be called while encoding.
+    ///
+    /// The cable carries about 300 Mbit/s, so the default spends bits freely: a high rate target,
+    /// and a ceiling on how coarsely any frame may be quantised (lower = sharper) so text stays
+    /// crisp in motion.
+    func apply(quality: QualityPreset, frameRate: Int) {
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: quality.averageBitRate as CFNumber)
+        let qp = VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: quality.maxQP as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: frameRate as CFNumber)
+        log("encoder: \(quality.averageBitRate / 1_000_000) Mbit/s average, max QP \(quality.maxQP) \(qp == 0 ? "on" : "not supported, status \(qp)"), \(frameRate) fps")
     }
 
     func encode(_ pixelBuffer: CVPixelBuffer, at pts: CMTime, forceKeyframe: Bool) {
         let props = forceKeyframe ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary : nil
-        let output = self.output
-        VTCompressionSessionEncodeFrame(session, imageBuffer: pixelBuffer, presentationTimeStamp: pts, duration: .invalid,
-                                        frameProperties: props, infoFlagsOut: nil) { status, _, sampleBuffer in
-            if status == 0, let sampleBuffer, let data = AnnexB.frame(from: sampleBuffer) { output(data) }
+        let output = self.output, onDrop = self.onDrop
+        let r = VTCompressionSessionEncodeFrame(session, imageBuffer: pixelBuffer, presentationTimeStamp: pts, duration: .invalid,
+                                                frameProperties: props, infoFlagsOut: nil) { status, flags, sampleBuffer in
+            if status == 0, !flags.contains(.frameDropped), let sampleBuffer, let data = AnnexB.frame(from: sampleBuffer) {
+                output(data)
+            } else {
+                onDrop()
+            }
         }
+        if r != 0 { onDrop() }
     }
 
     /// Finishes pending frames and releases the hardware encoder.

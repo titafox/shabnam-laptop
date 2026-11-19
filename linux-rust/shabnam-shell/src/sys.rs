@@ -203,6 +203,12 @@ fn niri_request(request: &str) -> Option<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(&line).ok()?.get("Ok").cloned()
 }
 
+/// Text a program chose for itself (app id, title), made fit for showing: no control
+/// characters, and no longer than `most` characters.
+fn tidy(text: &str, most: usize) -> String {
+    text.chars().filter(|c| !c.is_control()).take(most).collect()
+}
+
 /// The open windows, oldest first; None when niri cannot be asked.
 pub fn windows() -> Option<Vec<Window>> {
     let reply = niri_request("\"Windows\"")?;
@@ -215,8 +221,8 @@ pub fn windows() -> Option<Vec<Window>> {
             let part = |name: &str| stamp.and_then(|s| s.get(name)).and_then(|v| v.as_u64()).unwrap_or(0) as u128;
             Some(Window {
                 id: w.get("id")?.as_u64()?,
-                app_id: w.get("app_id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                title: w.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                app_id: tidy(w.get("app_id").and_then(|v| v.as_str()).unwrap_or(""), 128),
+                title: tidy(w.get("title").and_then(|v| v.as_str()).unwrap_or(""), 200),
                 focused: w.get("is_focused").and_then(|v| v.as_bool()).unwrap_or(false),
                 focus_time: part("secs") * 1_000_000_000 + part("nanos"),
             })

@@ -31,7 +31,7 @@ stop_extras() {
   echo "stopped:$STOPPED" >> $LOG
 }
 # Show the Shabnam start-up picture while the rest comes up (the session removes it).
-/data/void.sh "(echo 0 > /sys/class/graphics/fb0/blank; shabnam-splash /usr/share/shabnam/splash.bgra >/tmp/splash.log 2>&1 &)"
+/data/void.sh "mkdir -p /var/log/shabnam; chmod 700 /var/log/shabnam; (echo 0 > /sys/class/graphics/fb0/blank; shabnam-splash /usr/share/shabnam/splash.bgra >/var/log/shabnam/splash.log 2>&1 &)"
 
 stop_extras
 
@@ -58,7 +58,7 @@ stop_extras
 (sleep 30
  if [ -n "$(pidof niri-mali)$(pidof subscreen-rx)" ]; then echo "$(date) session running" >> $LOG; fi
  rm -f $B/trying; sync) &
-/data/void.sh "/root/session.sh >/tmp/session.log 2>&1"
+/data/void.sh "/root/session.sh >/var/log/shabnam/session.log 2>&1"
 
 # The desktop asked for power off or restart (quick panel): do it the clean way, through init.
 case "$(cat /data/void/run/mode 2>/dev/null)" in

@@ -29,7 +29,7 @@ enum PairingKey {
         return SymmetricKey(data: data)
     }
 
-    enum GenerateError: Error { case random, write }
+    enum GenerateError: Error { case random, write, tooShort }
 
     /// Replaces the key file with 32 fresh random bytes, readable by the owner only. The laptop
     /// must be given the same file afterwards or it will refuse the connection.
@@ -37,7 +37,18 @@ enum PairingKey {
         var bytes = Data(count: minimumLength)
         let status = bytes.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, minimumLength, $0.baseAddress!) }
         guard status == errSecSuccess else { throw GenerateError.random }
+        try install(bytes)
+    }
 
+    /// Replaces the key file with a copy of another file (for example the laptop's key, brought
+    /// over on a USB stick). The file must hold at least 32 bytes.
+    static func importKey(from source: URL) throws {
+        let bytes = try Data(contentsOf: source)
+        guard bytes.count >= minimumLength else { throw GenerateError.tooShort }
+        try install(bytes)
+    }
+
+    private static func install(_ bytes: Data) throws {
         let fm = FileManager.default
         let dir = url.deletingLastPathComponent()
         try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

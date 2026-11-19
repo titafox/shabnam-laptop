@@ -23,8 +23,9 @@
 	<string>6.0</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!-- Version and build number are placeholders: scripts/bundle.sh stamps them from VERSION. -->
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.0.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -39,6 +40,8 @@
 	<string>NSApplication</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Shabnam contributors. MIT License.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Shabnam Display takes the Mac's sound so it can be played on the laptop connected by cable instead of on the Mac.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Shabnam Display captures the extra screen it creates, and the Mac's sound, to show them on the laptop connected by cable.</string>
 </dict>

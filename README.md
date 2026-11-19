@@ -13,11 +13,11 @@ now; the Mac app has its own English README in `linux-rust/mac/ShabnamDisplay/`.
 > 其中有写启动分区的步骤，这款机器没有可用的刷机通道，写错了无法恢复。
 > 不要在没有读懂的情况下照着操作。
 
-![桌面](docs/images/desktop.jpg)
+![桌面和启动器](docs/images/launcher.jpg)
 
-| 启动器 | Mac 端设置 |
-|---|---|
-| ![启动器](docs/images/launcher.jpg) | ![Mac 设置窗口](docs/images/mac-settings.png) |
+Mac 端的设置窗口：
+
+<img src="docs/images/mac-settings.png" width="520" alt="Mac 设置窗口">
 
 ## 硬件
 

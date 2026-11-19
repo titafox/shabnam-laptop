@@ -78,7 +78,6 @@ Mac 端的设置窗口：
 | `linux-rust/patches/` | niri 和 smithay 适配 Mali 驱动的补丁 |
 | `linux-rust/branding/` | 标志、壁纸、开机画面、应用图标 |
 | `kmod/` | 为原厂内核编译的几个内核模块（USB 网络等）和相关工具 |
-| `lan-helper/` | 更早阶段的工作：在安卓上做的局域网安装通道和 ChromeOS 风格安卓桌面。现在的系统不再使用 |
 | `docs/` | 设计文档和图片 |
 
 ## 快捷键

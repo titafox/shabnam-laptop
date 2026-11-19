@@ -1,0 +1,42 @@
+# What the Shabnam status bar shows: network, battery, date and time.
+icons_format = "{icon}"
+
+[theme]
+theme = "plain"
+[theme.overrides]
+idle_bg = "#061a3300"
+idle_fg = "#e8f4f8"
+info_bg = "#061a3300"
+info_fg = "#12c8c4"
+good_bg = "#061a3300"
+good_fg = "#12c8c4"
+warning_bg = "#061a3300"
+warning_fg = "#ffc857"
+critical_bg = "#061a3300"
+critical_fg = "#ff6b6b"
+separator = ""
+
+[icons]
+icons = "material-nf"
+
+[[block]]
+block = "net"
+device = "wlan0"
+format = " $icon {$ssid|$ip} "
+missing_format = " 󰖪 "
+interval = 10
+
+[[block]]
+block = "battery"
+driver = "sysfs"
+device = "rk-bat"
+format = " $icon $percentage "
+full_format = " $icon $percentage "
+interval = 30
+warning = 25
+critical = 10
+
+[[block]]
+block = "time"
+interval = 10
+format = " $timestamp.datetime(f:'%m-%d %a  %H:%M') "

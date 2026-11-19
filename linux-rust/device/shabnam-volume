@@ -1,0 +1,19 @@
+#!/bin/sh
+# shabnam-volume up|down|mute|get|set N — output volume, 0..100 %; prints the result
+# (0 while muted). The codec has no volume of its own: PipeWire scales the samples.
+# WirePlumber remembers the level across restarts (/root/.local/state/wireplumber).
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user0} HOME=${HOME:-/root}
+SINK=@DEFAULT_AUDIO_SINK@
+STEP=5
+case "$1" in
+  up)   wpctl set-mute $SINK 0; wpctl set-volume -l 1.0 $SINK ${STEP}%+ ;;
+  down) wpctl set-mute $SINK 0; wpctl set-volume $SINK ${STEP}%- ;;
+  mute) wpctl set-mute $SINK toggle ;;
+  set)  wpctl set-mute $SINK 0; wpctl set-volume -l 1.0 $SINK "$(( ${2:-40} ))%" ;;
+  get)  ;;
+  *) echo "usage: shabnam-volume up|down|mute|get|set N" >&2; exit 2 ;;
+esac 2>/dev/null
+# "Volume: 0.45" or "Volume: 0.45 [MUTED]"; prints 0 if sound is not running.
+wpctl get-volume $SINK 2>/dev/null | awk '
+  { v = int($2 * 100 + 0.5); if ($3 == "[MUTED]") v = 0; print v; ok = 1 }
+  END { if (!ok) print 0 }'

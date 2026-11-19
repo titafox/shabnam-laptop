@@ -1,0 +1,61 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index fa7164e..e61dde0 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -188,3 +188,7 @@ assets = [
+     ["resources/niri.service", "/usr/lib/systemd/user/", "644"],
+     ["resources/niri-shutdown.target", "/usr/lib/systemd/user/", "644"],
+ ]
++
++[patch."https://github.com/Smithay/smithay.git"]
++smithay = { path = "../smithay" }
++smithay-drm-extras = { path = "../smithay/smithay-drm-extras" }
+diff --git a/src/backend/tty.rs b/src/backend/tty.rs
+index 5368c7e..476a3bc 100644
+--- a/src/backend/tty.rs
++++ b/src/backend/tty.rs
+@@ -779,21 +779,29 @@ impl Tty {
+ 
+         let mut try_initialize_gpu = || {
+             let display = unsafe { EGLDisplay::new(gbm.clone())? };
+-            let egl_device = EGLDevice::device_for_display(&display)?;
+-
+-            // Software EGL devices (e.g., llvmpipe/softpipe) are rejected for now. They have some
+-            // problems (segfault on importing dmabufs from other renderers) and need to be
+-            // excluded from some places like DRM leasing.
+-            ensure!(
+-                !egl_device.is_software(),
+-                "software EGL renderers are skipped"
+-            );
+-
+-            let render_node = egl_device
+-                .try_get_render_node()
+-                .ok()
+-                .flatten()
+-                .unwrap_or(node);
++            // Vendor EGL stacks (e.g. Rockchip libmali) lack EGL_EXT_device_base, so the EGL
++            // device cannot be queried. Such stacks are never software renderers; derive the
++            // render node from the DRM node instead.
++            let render_node = match EGLDevice::device_for_display(&display) {
++                Ok(egl_device) => {
++                    // Software EGL devices (e.g., llvmpipe/softpipe) are rejected for now.
++                    ensure!(
++                        !egl_device.is_software(),
++                        "software EGL renderers are skipped"
++                    );
++                    egl_device
++                        .try_get_render_node()
++                        .ok()
++                        .flatten()
++                        .unwrap_or(node)
++                }
++                Err(err) => {
++                    debug!("no EGL device for display ({err}), deriving render node from DRM node");
++                    node.node_with_type(NodeType::Render)
++                        .and_then(Result::ok)
++                        .unwrap_or(node)
++                }
++            };
+             self.gpu_manager
+                 .as_mut()
+                 .add_node(render_node, gbm.clone())

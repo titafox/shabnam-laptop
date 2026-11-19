@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Name[zh_CN]=终端
+Exec=foot
+Icon=/usr/share/shabnam/icons/terminal.png
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupWMClass=foot

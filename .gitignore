@@ -30,3 +30,11 @@ lan-helper/log/
 log/
 rkdeveloptool/
 .superpowers/
+# boot partition backups (large, device-specific)
+backup-boot-*/
+# Shabnam (linux-rust): build output and generated files
+target/
+.build/
+*.bgra
+*.new
+linux-rust/mac/subscreen-tx/subscreen-tx

@@ -1,0 +1,4 @@
+#!/bin/sh
+# A small window with a text box, for trying the Chinese input method.
+export NO_AT_BRIDGE=1
+exec gtk-builder-tool preview /usr/share/shabnam/ime-test.ui

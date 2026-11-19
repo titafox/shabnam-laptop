@@ -1,0 +1,73 @@
+# Rio terminal for Shabnam — install as /root/.config/rio/config.toml
+#
+# The Mali-G52 vendor blob is GLES-only (no Vulkan, no GL_EXT_blend_func_extended), and the
+# GPU-drawn Rust terminals do not work on it. Rio's CPU renderer draws through wl_shm and does.
+confirm-before-quit = false
+padding-x = 8
+padding-y = [8, 8]
+line-height = 1.1
+hide-mouse-cursor-when-typing = true
+
+[renderer]
+use-cpu = true
+disable-unfocused-render = false
+
+# Without this Rio forks /bin/sh (dash) in a way that exits at once, and the window never appears.
+[shell]
+program = "/bin/bash"
+args = ["--login"]
+
+[window]
+decorations = "Disabled"
+
+[navigation]
+mode = "Plain"
+
+[fonts]
+size = 16
+family = "DejaVu Sans Mono"
+extras = [{ family = "Noto Sans Mono CJK SC" }, { family = "Symbols Nerd Font Mono" }]
+
+[cursor]
+shape = "block"
+blinking = false
+
+# Shabnam: deep navy #061a33, teal #12c8c4, white text.
+[colors]
+background = '#061a33'
+foreground = '#f2f6fa'
+cursor = '#12c8c4'
+vi-cursor = '#12c8c4'
+selection-background = '#12c8c4'
+selection-foreground = '#061a33'
+tabs = '#0b2647'
+tabs-active = '#12c8c4'
+split = '#12466b'
+
+black = '#0b2647'
+red = '#ff6b7a'
+green = '#5fd38d'
+yellow = '#f2c66d'
+blue = '#5aa9ff'
+magenta = '#c597f5'
+cyan = '#12c8c4'
+white = '#d5dee8'
+
+light-black = '#4f6b8a'
+light-red = '#ff8f9a'
+light-green = '#86e3a9'
+light-yellow = '#f7d993'
+light-blue = '#8cc4ff'
+light-magenta = '#d9b8fa'
+light-cyan = '#5fe0dc'
+light-white = '#ffffff'
+
+dim-black = '#081f3c'
+dim-red = '#b34b56'
+dim-green = '#439463'
+dim-yellow = '#a98b4c'
+dim-blue = '#3f76b3'
+dim-magenta = '#8a6aac'
+dim-cyan = '#0d8c89'
+dim-white = '#95a3b3'
+dim-foreground = '#a9b6c4'

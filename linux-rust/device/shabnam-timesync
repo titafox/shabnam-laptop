@@ -1,0 +1,19 @@
+#!/bin/sh
+# shabnam-timesync start|stop|status — network time with ntpd-rs, no service manager.
+# The kernel copies a synchronised clock to the rk808 RTC by itself (RTC_SYSTOHC).
+PID=/run/shabnam-timesync.pid
+running() { [ -s $PID ] && kill -0 "$(cat $PID)" 2>/dev/null; }
+case "$1" in
+  start)
+    running && exit 0
+    mkdir -p /run/ntpd-rs && chown _ntpd_rs:_ntpd_rs /run/ntpd-rs
+    setsid setpriv --reuid _ntpd_rs --regid _ntpd_rs --clear-groups \
+      --ambient-caps -all,+sys_time,+net_bind_service \
+      --inh-caps -all,+sys_time,+net_bind_service \
+      --bounding-set -all,+sys_time,+net_bind_service --no-new-privs -- \
+      ntp-daemon -c /etc/ntpd-rs/shabnam.toml >/tmp/ntpd-rs.log 2>&1 </dev/null &
+    echo $! > $PID ;;
+  stop) running && kill "$(cat $PID)"; rm -f $PID ;;
+  status) running && ntp-ctl status || { echo "not running"; exit 1; } ;;
+  *) echo "usage: shabnam-timesync start|stop|status" >&2; exit 2 ;;
+esac

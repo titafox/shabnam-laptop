@@ -1,0 +1,12 @@
+# Boot into the Linux desktop in /data/void instead of the Android interface.
+# The script lives on /data so it can change without touching this partition.
+# To get Android back: `touch /data/void-boot/disabled` and reboot (or delete this file).
+service void-desktop /vendor/bin/sh /data/void-boot/boot.sh
+    user root
+    group root system
+    seclabel u:r:su:s0
+    disabled
+    oneshot
+
+on post-fs-data
+    start void-desktop

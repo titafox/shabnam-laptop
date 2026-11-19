@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TextEdit
+Name[zh_CN]=文本编辑
+Comment=Helix text editor
+Exec=hx %F
+Icon=/usr/share/shabnam/icons/textedit.png
+Terminal=true
+Categories=Utility;TextEditor;

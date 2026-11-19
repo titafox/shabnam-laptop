@@ -1,0 +1,34 @@
+#!/bin/sh
+# shabnam-lid close|open|state|start|stop — lid handling without suspend.
+#   close : backlight off        open : backlight on
+#   state : "open" / "closed", read from the hall sensor line (gpio0-30, high = open)
+#   start : watcher that calls close/open when the line changes; stop ends it
+# The hall driver only reports keys (KEY_SLEEP/KEY_WAKEUP), not a lid switch, and sends the
+# wake-up key only if it believes the screen is blanked — so the watcher reads the line itself.
+B=/sys/class/backlight/backlight
+PID=/run/shabnam-lid.pid
+G=/sys/kernel/debug/gpio
+state() {
+  [ -r $G ] || mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+  case "$(grep hall_mh248 $G 2>/dev/null)" in
+    *" lo"*) echo closed ;; *" hi"*) echo open ;; *) echo unknown ;;
+  esac
+}
+running() { [ -s $PID ] && kill -0 "$(cat $PID)" 2>/dev/null; }
+case "$1" in
+  close) echo 4 > $B/bl_power ;;
+  open)  echo 0 > /sys/class/graphics/fb0/blank; echo 0 > $B/bl_power ;;
+  state) state ;;
+  start) running || setsid "$0" watch >/dev/null 2>&1 </dev/null & ;;
+  watch)
+    echo $$ > $PID
+    last=$(state)
+    while :; do
+      sleep 1
+      now=$(state)
+      [ "$now" = "$last" ] || [ "$now" = unknown ] && continue
+      last=$now; "$0" "$now"
+    done ;;
+  stop) running && kill "$(cat $PID)"; rm -f $PID ;;
+  *) echo "usage: shabnam-lid close|open|state|start|stop" >&2; exit 2 ;;
+esac

@@ -1,0 +1,61 @@
+#!/bin/sh
+# shabnam-audio start|stop|status — desktop sound on the rk809 codec (ALSA card 0).
+# The Android kernel has no SysV IPC, so ALSA dmix cannot work; PipeWire does the mixing
+# and the software volume (the codec has none). Programs reach it as PulseAudio
+# (/run/user0/pulse/native), as PipeWire, or as the ALSA "default" device.
+#   start : pipewire + wireplumber + pipewire-pulse, and the jack watcher (speaker <-> headphones)
+#   stop  : stop all of it, kill whatever still holds the PCM, Playback Path OFF
+#           (session.sh calls this before subscreen-rx, which opens plughw:0,0 itself)
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user0} HOME=${HOME:-/root}
+PID=/run/shabnam-audio.pid
+JACK=/sys/class/extcon/extcon5/state
+path() { amixer -c 0 -q cset name='Playback Path' "$1" >/dev/null 2>&1; }
+want() { if grep -q '^HEADPHONE=1' $JACK 2>/dev/null; then echo HP; else echo SPK; fi; }
+running() { [ -s $PID ] && kill -0 "$(cat $PID)" 2>/dev/null; }
+
+case "$1" in
+start)
+  running && exit 0
+  mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+  # WirePlumber finds sound cards through udev; session.sh only triggers input and drm.
+  udevadm trigger --action=add --subsystem-match=sound && udevadm settle
+  path "$(want)"
+  cd /
+  setsid pipewire       >/tmp/pipewire.log       2>&1 </dev/null &
+  i=0; while [ ! -S "$XDG_RUNTIME_DIR/pipewire-0" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+  setsid wireplumber    >/tmp/wireplumber.log    2>&1 </dev/null &
+  setsid pipewire-pulse >/tmp/pipewire-pulse.log 2>&1 </dev/null &
+  setsid "$0" watch >/dev/null 2>&1 </dev/null &
+  ;;
+watch)  # internal: follow the headphone jack
+  echo $$ > $PID
+  last=
+  while :; do
+    now=$(want)
+    [ "$now" != "$last" ] && { path "$now"; last=$now; }
+    sleep 1
+  done
+  ;;
+stop)
+  running && kill "$(cat $PID)"
+  rm -f $PID
+  for p in $(pidof pipewire-pulse wireplumber pipewire); do kill "$p" 2>/dev/null; done
+  i=0; while pidof pipewire >/dev/null && [ $i -lt 30 ]; do sleep 0.1; i=$((i+1)); done
+  # Anything else still holding the codec would make subscreen-rx fail with "busy".
+  for fd in /proc/[0-9]*/fd/*; do
+    case "$(readlink "$fd" 2>/dev/null)" in /dev/snd/pcmC0D0[pc])
+      p=${fd#/proc/}; p=${p%%/*}
+      [ "$(cat /proc/$p/comm 2>/dev/null)" = subscreen-rx ] || kill -9 "$p" 2>/dev/null ;;
+    esac
+  done
+  path OFF
+  ;;
+status)
+  running && echo "watcher: running ($(cat $PID))" || echo "watcher: stopped"
+  echo "daemons: pipewire=$(pidof pipewire || echo -) wireplumber=$(pidof wireplumber || echo -) pulse=$(pidof pipewire-pulse || echo -)"
+  echo "jack: $(want)   path: $(amixer -c 0 cget name='Playback Path' 2>/dev/null | sed -n 's/.*: values=//p')"
+  echo "pcm: $(head -1 /proc/asound/card0/pcm0p/sub0/status 2>/dev/null)"
+  echo "volume: $(shabnam-volume get)"
+  ;;
+*) echo "usage: shabnam-audio start|stop|status" >&2; exit 2 ;;
+esac

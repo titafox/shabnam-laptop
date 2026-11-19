@@ -1,0 +1,48 @@
+// Shabnam desktop. Mod = the Win key.
+// Wallpaper.
+spawn-at-startup "sh" "-c" "awww-daemon >/tmp/awww.log 2>&1 & sleep 1; awww img /usr/share/shabnam/wallpaper.jpg --transition-type none"
+// Shelf, launcher and quick settings (restarted if it ever stops while the desktop is up).
+spawn-at-startup "sh" "-c" "while pidof niri-mali >/dev/null; do shabnam-shell >>/tmp/shabnam-shell.log 2>&1; sleep 1; done"
+// Chinese input method: Ctrl+Space switches.
+spawn-at-startup "shabnam-ime"
+
+output "eDP-1" { scale 1.5; }
+// Touchpad: tap to click, two-finger tap or two-finger press = right click, three-finger tap = middle.
+input {
+    touchpad {
+        tap
+        click-method "clickfinger"
+        dwt
+        natural-scroll
+    }
+}
+prefer-no-csd
+// Shabnam brand colours: deep navy backdrop, teal focus ring.
+layout {
+    background-color "#061a33"
+    focus-ring { width 3; active-color "#12c8c4"; inactive-color "#12364f"; }
+}
+hotkey-overlay { skip-at-startup; }
+binds {
+    Mod+Space { spawn "shabnam-shell" "toggle-launcher"; }
+    Mod+D { spawn "shabnam-shell" "toggle-launcher"; }
+    Mod+S { spawn "shabnam-shell" "toggle-quick"; }
+    // foot draws with the processor, so it works on this graphics chip, and has a close button.
+    Mod+T { spawn "foot"; }
+    Mod+Return { spawn "foot"; }
+    Mod+B { spawn "shabnam-browser"; }
+    Mod+Q { close-window; }
+    Alt+F4 { close-window; }
+    Mod+W { close-window; }
+    Mod+Left { focus-column-left; }
+    Mod+Right { focus-column-right; }
+    Mod+F { maximize-column; }
+    XF86AudioRaiseVolume  allow-when-locked=true { spawn "shabnam-volume" "up"; }
+    XF86AudioLowerVolume  allow-when-locked=true { spawn "shabnam-volume" "down"; }
+    XF86AudioMute         allow-when-locked=true { spawn "shabnam-volume" "mute"; }
+    XF86MonBrightnessUp   allow-when-locked=true { spawn "shabnam-brightness" "up"; }
+    XF86MonBrightnessDown allow-when-locked=true { spawn "shabnam-brightness" "down"; }
+    // Become the Mac's second screen; the same key comes back here.
+    Mod+Escape { spawn "sh" "-c" "echo mac > /run/mode; niri msg action quit --skip-confirmation"; }
+    Mod+Shift+E { quit; }
+}

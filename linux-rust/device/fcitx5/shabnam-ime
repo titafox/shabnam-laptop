@@ -1,0 +1,15 @@
+#!/bin/sh
+# shabnam-ime — start the Chinese input method for the desktop (called from niri.kdl at start-up).
+# fcitx5 and the programs that talk to it meet on a session bus at the well-known place
+# $XDG_RUNTIME_DIR/bus, which every D-Bus library finds without any variable being set.
+: "${XDG_RUNTIME_DIR:=/run/user0}"; export XDG_RUNTIME_DIR
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+export LANG="${LANG:-en_US.UTF-8}"
+# These must stay unset for fcitx5 itself; programs use the compositor's own text-input channel.
+unset GTK_IM_MODULE QT_IM_MODULE
+[ -S "$XDG_RUNTIME_DIR/bus" ] && pidof dbus-daemon >/dev/null || {
+  rm -f "$XDG_RUNTIME_DIR/bus"
+  dbus-daemon --session --address="$DBUS_SESSION_BUS_ADDRESS" --nopidfile --fork
+}
+# -r takes over from an older copy (one left from before the desktop was restarted).
+exec fcitx5 -r >/tmp/fcitx5.log 2>&1

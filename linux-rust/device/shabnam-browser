@@ -1,0 +1,59 @@
+#!/bin/sh
+# shabnam-browser — the Shabnam web browser: Chromium (Void's stable package), drawn natively on Wayland.
+#
+# Who it runs as: the desktop runs as root, and a browser must not. When started by root this script lets the
+# unprivileged user "shabnam" (uid 700) reach the compositor's Wayland socket and the sound server's socket —
+# and nothing else — then drops to that user. Started by anyone else it just runs.
+#
+# --no-sandbox: this Android kernel has no user namespaces and no PID namespaces (CONFIG_USER_NS and
+#   CONFIG_PID_NS are off), so Chromium's sandbox cannot start at all; without this flag the browser exits
+#   with "No usable sandbox!". Running as "shabnam" instead of root is the protection that is left: a
+#   compromised page can reach that user's files, not the system. Drop the flag if the kernel ever gains
+#   user namespaces.
+# --disable-gpu-rasterization: pages are composited by the Mali GPU (smooth scrolling, WebGL) but painted on
+#   the CPU. Painting on this GPU driver leaves the page blank on roughly every second start.
+umask 022   # the desktop's root shell runs with umask 0; the browser's files must not be world-writable
+BROWSER_USER=shabnam
+MALI_LIBS=/opt/mali/mali:/opt/mali:/opt/mpp2/usr/lib/aarch64-linux-gnu
+
+socket=${WAYLAND_DISPLAY:-wayland-1}
+case $socket in /*) ;; *) socket=${XDG_RUNTIME_DIR:-/run/user0}/$socket ;; esac
+
+if [ "$(id -u)" = 0 ]; then
+  uid=$(id -u "$BROWSER_USER") || { echo "shabnam-browser: user $BROWSER_USER is missing" >&2; exit 1; }
+  # Only two sockets are handed to the browser user: the compositor's and the sound server's. They are
+  # hard-linked into a directory that root owns, so root's own runtime directory stays closed (0700) and
+  # the browser user cannot swap the links for something else.
+  share=/run/shabnam-share
+  mkdir -p "$share" && chown root:"$BROWSER_USER" "$share" && chmod 750 "$share" &&
+    chgrp "$BROWSER_USER" "$socket" && chmod 660 "$socket" && ln -f "$socket" "$share/wayland-0" ||
+    { echo "shabnam-browser: cannot share $socket with $BROWSER_USER" >&2; exit 1; }
+  socket=$share/wayland-0
+  pulse=${XDG_RUNTIME_DIR:-/run/user0}/pulse/native
+  if [ -S "$pulse" ] && chgrp "$BROWSER_USER" "$pulse" && chmod 660 "$pulse" && ln -f "$pulse" "$share/pulse-native"
+  then pulse=unix:$share/pulse-native; else pulse=; fi
+  runtime=/run/user/$uid
+  mkdir -p "$runtime" && chown "$BROWSER_USER:$BROWSER_USER" "$runtime" && chmod 700 "$runtime"
+  home=$(getent passwd "$BROWSER_USER" | cut -d: -f6)
+  cd "$home" || exit 1
+  exec setpriv --reuid "$BROWSER_USER" --regid "$BROWSER_USER" --init-groups \
+    env -i HOME="$home" USER="$BROWSER_USER" LOGNAME="$BROWSER_USER" SHELL=/bin/sh \
+      PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-zh_CN.UTF-8}" ${TZ:+TZ="$TZ"} \
+      XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY="$socket" \
+      PULSE_SERVER="$pulse" \
+      LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MALI_LIBS}" \
+      SHABNAM_BROWSER_FLAGS="$SHABNAM_BROWSER_FLAGS" \
+      "$0" "$@"
+fi
+
+# Ties the window to shabnam-browser.desktop (Wayland app-id "shabnam-browser").
+export CHROME_DESKTOP=shabnam-browser.desktop
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MALI_LIBS}"
+exec /usr/lib/chromium/chromium \
+  --ozone-platform=wayland \
+  --no-sandbox \
+  --disable-gpu-rasterization \
+  --enable-wayland-ime --wayland-text-input-version=3 \
+  --password-store=basic \
+  --no-first-run --no-default-browser-check \
+  $SHABNAM_BROWSER_FLAGS "$@"

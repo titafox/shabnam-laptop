@@ -1,0 +1,9 @@
+[Desktop Entry]
+# Installed as /usr/local/share/applications/chromium.desktop. It shadows the entry the chromium package
+# ships, so menus show only "Browser" (shabnam-browser.desktop). Starting Chromium through the package's own
+# entry would run it as root and fail: the kernel cannot run its sandbox.
+Type=Application
+Name=Chromium
+Exec=shabnam-browser %U
+Icon=chromium
+NoDisplay=true

@@ -1,0 +1,21 @@
+# Shabnam status bar (i3bar-river). Data comes from i3status-rs.
+background = "#061a33f2"
+color = "#e8f4f8ff"
+separator = "#12364fff"
+tag_fg = "#9fb6c8ff"
+tag_bg = "#061a33f2"
+tag_focused_fg = "#061a33ff"
+tag_focused_bg = "#12c8c4ff"
+tag_urgent_fg = "#061a33ff"
+tag_urgent_bg = "#ff8a5cff"
+tag_inactive_fg = "#4f6b82ff"
+tag_inactive_bg = "#061a33f2"
+font = "Roboto 11"
+height = 30
+position = "top"
+separator_width = 0.0
+tags_r = 6.0
+tags_padding = 14.0
+blocks_r = 6.0
+hide_inactive_tags = true
+command = "i3status-rs /etc/shabnam/i3status.toml"

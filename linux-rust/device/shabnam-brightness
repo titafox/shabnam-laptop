@@ -1,0 +1,20 @@
+#!/bin/sh
+# shabnam-brightness up|down|get|set N — panel backlight in percent; prints the result.
+# Steps of ~7 %; never goes below a still-readable minimum.
+B=/sys/class/backlight/backlight
+max=$(cat $B/max_brightness); cur=$(cat $B/brightness)
+step=$(( max * 7 / 100 )); min=$(( max * 4 / 100 ))
+pct() { echo $(( ($1 * 100 + max / 2) / max )); }
+case "$1" in
+  up)   new=$((cur+step)) ;;
+  down) new=$((cur-step)) ;;
+  set)  new=$(( ${2:-50} * max / 100 )) ;;
+  get)  pct "$cur"; exit 0 ;;
+  *) echo "usage: shabnam-brightness up|down|get|set N" >&2; exit 2 ;;
+esac
+[ "$new" -gt "$max" ] && new=$max
+[ "$new" -lt "$min" ] && new=$min
+echo "$new" > $B/brightness
+# A key press should always give light back if the panel had been switched off.
+[ "$(cat $B/bl_power)" = 0 ] || { echo 0 > /sys/class/graphics/fb0/blank; echo 0 > $B/bl_power; }
+pct "$new"

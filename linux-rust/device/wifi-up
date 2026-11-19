@@ -1,0 +1,30 @@
+#!/bin/sh
+# wifi-up — connect wlan0 using this system's own Wi-Fi programs (no Android involved).
+# Reads the network saved by wifi-setup. Safe to run again at any time.
+CONF=/etc/wpa_supplicant/wpa_supplicant-wlan0.conf
+[ -s $CONF ] || { echo "no saved network yet: run wifi-setup first" >&2; exit 1; }
+# Android's Wi-Fi programs must let go of the radio first (they are not restarted by anything).
+for name in wificond wpa_supplicant dhcpcd; do
+  for p in $(pidof $name); do kill $p 2>/dev/null; done
+done
+sleep 1
+ip link set wlan0 up
+wpa_supplicant -B -D nl80211 -i wlan0 -c $CONF -P /run/wpa-wlan0.pid >/tmp/wpa.log 2>&1 || { echo "could not start the Wi-Fi program; see /tmp/wpa.log" >&2; exit 1; }
+i=0
+while [ $i -lt 20 ]; do
+  wpa_cli -i wlan0 status 2>/dev/null | grep -q '^wpa_state=COMPLETED' && break
+  sleep 1; i=$((i+1))
+done
+if [ $i -ge 20 ]; then
+  echo "could not join the network (wrong password, or out of range)" >&2
+  wpa_cli -i wlan0 status 2>/dev/null | grep -E '^(wpa_state|ssid)=' >&2
+  exit 2
+fi
+# Android leaves routing rules behind that ignore the normal routing table; put it first.
+ip rule add pref 5900 from all lookup main 2>/dev/null
+ip -6 rule add pref 5900 from all lookup main 2>/dev/null
+dhcpcd -q -b wlan0 2>/dev/null
+i=0; while [ $i -lt 15 ] && ! ip -4 addr show wlan0 | grep -q 'inet '; do sleep 1; i=$((i+1)); done
+ip -4 -br addr show wlan0
+ip -4 addr show wlan0 | grep -q 'inet ' || { echo "joined the network but got no address" >&2; exit 3; }
+echo "Wi-Fi connected."

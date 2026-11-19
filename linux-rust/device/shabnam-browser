@@ -12,6 +12,8 @@
 #   user namespaces.
 # --disable-gpu-rasterization: pages are composited by the Mali GPU (smooth scrolling, WebGL) but painted on
 #   the CPU. Painting on this GPU driver leaves the page blank on roughly every second start.
+# --num-raster-threads=4: that CPU painting uses all four cores instead of the default two; a full-window
+#   repaint measured 13.3 frames a second instead of 11.8.
 umask 022   # the desktop's root shell runs with umask 0; the browser's files must not be world-writable
 BROWSER_USER=shabnam
 MALI_LIBS=/opt/mali/mali:/opt/mali:/opt/mpp2/usr/lib/aarch64-linux-gnu
@@ -53,6 +55,7 @@ exec /usr/lib/chromium/chromium \
   --ozone-platform=wayland \
   --no-sandbox \
   --disable-gpu-rasterization \
+  --num-raster-threads=4 \
   --enable-wayland-ime --wayland-text-input-version=3 \
   --password-store=basic \
   --no-first-run --no-default-browser-check \

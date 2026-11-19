@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Window caption buttons. The stock colours are 20% opaque (the "focused" state is never set), and apps that
+     draw their own tab strip under the caption (Chromium) always get the "light" colour whatever the background.
+     Day mode: mid grey that shows on both light and dark strips. Night mode (values-night): white. -->
+<resources>
+    <color name="decor_button_dark_color">#D9000000</color>
+    <color name="decor_button_light_color">#FF6E7378</color>
+</resources>

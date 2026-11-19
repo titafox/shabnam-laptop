@@ -1,0 +1,32 @@
+# large binaries and backups (kept on disk, not in history)
+firmware-backup-*/
+gsi/
+stock-apps-backup-*/
+apps/
+lan-helper/dist/
+*.img
+*.img.gz
+*.apk
+*.zip
+# signing keys — never commit
+.install-keys/
+.platform-keys/
+*.pk8
+*.pem
+*.jks
+*.keystore
+# build output and runtime state
+build/
+out/
+__pycache__/
+*.class
+*.o
+*.mod.c
+.DS_Store
+lan-helper/events.jsonl
+lan-helper/shots/
+lan-helper/last-shot.png
+lan-helper/log/
+log/
+rkdeveloptool/
+.superpowers/

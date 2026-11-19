@@ -1,0 +1,48 @@
+make: Entering directory '/root/rk-kmod/kernel'
+  CC [M]  /root/rk-kmod/extra-mods/tcp_bbr.o
+  CC [M]  /root/rk-kmod/extra-mods/sch_fq.o
+  CC [M]  /root/rk-kmod/extra-mods/f_ncm.o
+  CC [M]  /root/rk-kmod/extra-mods/f_ecm.o
+  LD [M]  /root/rk-kmod/extra-mods/usb_f_ecm.o
+  LD [M]  /root/rk-kmod/extra-mods/usb_f_ncm.o
+  Building modules, stage 2.
+  MODPOST 4 modules
+  CC      /root/rk-kmod/extra-mods/sch_fq.mod.o
+  CC      /root/rk-kmod/extra-mods/tcp_bbr.mod.o
+  CC      /root/rk-kmod/extra-mods/usb_f_ecm.mod.o
+  CC      /root/rk-kmod/extra-mods/usb_f_ncm.mod.o
+  LD [M]  /root/rk-kmod/extra-mods/sch_fq.ko
+  LD [M]  /root/rk-kmod/extra-mods/tcp_bbr.ko
+  LD [M]  /root/rk-kmod/extra-mods/usb_f_ecm.ko
+  LD [M]  /root/rk-kmod/extra-mods/usb_f_ncm.ko
+make: Leaving directory '/root/rk-kmod/kernel'
+=== tcp_bbr.ko
+1e808e9b85036cde55949827dc04654f393d790eb946dfa4637fbdb020ad0a03  tcp_bbr.ko
+license:        Dual BSD/GPL
+depends:        
+name:           tcp_bbr
+vermagic:       4.19.232 SMP preempt mod_unload modversions aarch64
+undefined=10 unresolved=0 ; __versions entries=11 mismatches=0
+=== sch_fq.ko
+8f394fae0aaac343d7bacb40f25252f26f8a29320dea1ed0faea5f5306c7e077  sch_fq.ko
+license:        GPL
+depends:        
+name:           sch_fq
+vermagic:       4.19.232 SMP preempt mod_unload modversions aarch64
+undefined=33 unresolved=0 ; __versions entries=34 mismatches=0
+=== usb_f_ncm.ko
+a17d18772a44afd78c0b3d66a2e8765dfc7eeefe82503904ea153001e29e04cc  usb_f_ncm.ko
+license:        GPL
+alias:          usbfunc:ncm
+depends:        
+name:           usb_f_ncm
+vermagic:       4.19.232 SMP preempt mod_unload modversions aarch64
+undefined=62 unresolved=0 ; __versions entries=63 mismatches=0
+=== usb_f_ecm.ko
+f15344a5be20afda1a6da76298ace7a135ec623a5f50fd03d3be0e1bb16aa13f  usb_f_ecm.ko
+license:        GPL
+alias:          usbfunc:ecm
+depends:        
+name:           usb_f_ecm
+vermagic:       4.19.232 SMP preempt mod_unload modversions aarch64
+undefined=44 unresolved=0 ; __versions entries=45 mismatches=0

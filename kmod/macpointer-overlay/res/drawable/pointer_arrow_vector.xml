@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Slim black arrow with a tail and a white edge. The tip sits at (4.5, 3.5) to match the stock hot spot. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FF000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.1" android:strokeLineJoin="round"
+        android:pathData="M4.5,3.5 L4.5,19.6 L8.2,16.3 L10.6,22 L12.9,21 L10.5,15.4 L15.6,15.4 Z"/>
+</vector>

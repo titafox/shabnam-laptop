@@ -1,0 +1,754 @@
+0xac555fe6	tcp_register_congestion_control	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc1c4ec12	tcp_unregister_congestion_control	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7f9ea0c9	tcp_ca_get_key_by_name	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6735d56e	tcp_ca_get_name_by_key	match	
+0xe8d8d302	tcp_slow_start	match	sock,tcp_sock,inet_connection_sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer,minmax
+0xd9ce3f0d	tcp_cong_avoid_ai	match	sock,tcp_sock,inet_connection_sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer,minmax
+0x77506b5d	tcp_reno_cong_avoid	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5259040b	tcp_reno_ssthresh	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc31f86cb	tcp_reno_undo_cwnd	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8025f0b3	tcp_select_initial_window	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe2c481f4	tcp_release_cb	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9329583c	tcp_mtu_to_mss	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x03cee4f7	tcp_mss_to_mtu	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb3b6f6cd	tcp_mtup_init	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7af7c2fe	tcp_sync_mss	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4a41174c	tcp_make_synack	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9799ef80	tcp_connect	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0059ff8d	__tcp_send_ack	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7967d3c4	tcp_rtx_synack	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdedad84a	tcp_enter_quickack_mode	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb9ce5b73	tcp_initialize_rcv_mss	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9d51e69b	tcp_enter_cwr	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa580393c	tcp_simple_retransmit	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd2872aff	tcp_parse_options	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x666231c6	tcp_rcv_established	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x68ab6500	tcp_rcv_state_process	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdcdcfa2d	inet_reqsk_alloc	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfd4fe34e	tcp_conn_request	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xba905f66	tcp_rate_check_app_limited	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xab00d0e4	tcp_orphan_count	match	
+0xa0ebd14c	sysctl_tcp_mem	match	
+0xde6151db	tcp_memory_allocated	match	
+0xb53f2810	tcp_sockets_allocated	match	
+0xc2a814db	tcp_memory_pressure	match	
+0x3d1bf9ef	tcp_enter_memory_pressure	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd9b5acbb	tcp_leave_memory_pressure	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x35ab3ed5	tcp_init_sock	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb873aabc	tcp_poll	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2fcf985f	tcp_ioctl	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x063efdbe	tcp_splice_read	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x60e9eb6f	do_tcp_sendpages	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0c3ccdbd	tcp_sendpage_locked	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x429aa77c	tcp_sendpage	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xff83cce2	tcp_sendmsg_locked	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x18c22713	tcp_sendmsg	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfa2c2392	tcp_read_sock	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x08a03230	tcp_peek_len	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2170740f	tcp_set_rcvlowat	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdeb1f38e	tcp_mmap	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x63d9c541	tcp_recvmsg	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb09be9d9	tcp_set_state	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x401a5bbf	tcp_shutdown	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x06270cb6	tcp_close	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x366aa3ab	tcp_disconnect	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x51a2ab5b	tcp_setsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x25349989	compat_tcp_setsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x31abedc1	tcp_get_info	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2ddca66a	tcp_getsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc2f166c3	compat_tcp_getsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf4779a11	tcp_done	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x68363a6f	tcp_abort	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x463219fb	tcp_hashinfo	match	
+0xe088f0e9	tcp_twsk_unique	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x762355ea	tcp_v4_connect	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb54edcb0	tcp_v4_mtu_reduced	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf6847205	tcp_req_err	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x03640e4c	tcp_v4_send_check	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0bb7537c	tcp_v4_conn_request	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8b93c64c	tcp_v4_syn_recv_sock	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6cbf0275	tcp_v4_do_rcv	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x19ed4108	tcp_add_backlog	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdccd0b48	tcp_filter	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7ef56736	inet_sk_rx_dst_set	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdaffee13	ipv4_specific	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x937f7e5a	tcp_v4_destroy_sock	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd730e36e	tcp_seq_start	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x847059f0	tcp_seq_next	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9863c0f8	tcp_seq_stop	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3484eb12	tcp_prot	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x28ef94f1	tcp_timewait_state_process	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x720d3254	tcp_time_wait	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb294249c	tcp_twsk_destructor	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4af6716d	tcp_openreq_init_rwin	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc424cf29	tcp_ca_openreq_child	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xffaa754f	tcp_create_openreq_child	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xce8ce29d	tcp_check_req	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa3ecaf58	tcp_child_process	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbc296028	tcp_syn_ack_timeout	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa790e6d2	tcp_set_keepalive	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x98129de5	inet_rcv_saddr_equal	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7315a31c	inet_get_local_port_range	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3b769ee7	inet_csk_get_port	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa29bd318	inet_csk_accept	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x00ccfde9	inet_csk_init_xmit_timers	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbfc33e64	inet_csk_clear_xmit_timers	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x659d9c9c	inet_csk_delete_keepalive_timer	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xaf088f8d	inet_csk_reset_keepalive_timer	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb4b5894d	inet_csk_route_req	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x168ad34e	inet_csk_route_child_sock	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x64b1a74c	inet_rtx_syn_ack	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf6e72da9	inet_csk_reqsk_queue_drop	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x44be2791	inet_csk_reqsk_queue_drop_and_put	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd2e37f92	inet_csk_reqsk_queue_hash_add	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xeb31adcd	inet_csk_clone_lock	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x31e18bad	inet_csk_destroy_sock	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf01106de	inet_csk_prepare_forced_close	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6238b4f9	inet_csk_listen_start	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xabcc9faa	inet_csk_reqsk_queue_add	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc6750064	inet_csk_complete_hashdance	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7433c0f2	inet_csk_listen_stop	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x02caf1eb	inet_csk_addr2sockaddr	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x81678c29	inet_csk_compat_getsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa9547ce6	inet_csk_compat_setsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x07104170	inet_csk_update_pmtu	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb911bb58	minmax_running_max	match	minmax
+0x7aae8ede	register_qdisc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0f51c3f5	unregister_qdisc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x319442b8	qdisc_hash_add	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x11c19adc	qdisc_hash_del	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd042475c	qdisc_get_rtab	match	
+0xa61ced89	qdisc_put_rtab	match	
+0xb94339c4	qdisc_put_stab	match	
+0xf7134f8e	__qdisc_calculate_pkt_len	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x61af53e3	qdisc_warn_nonwc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6e374e98	qdisc_watchdog_init_clockid	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer,qdisc_watchdog
+0xc1a317be	qdisc_watchdog_init	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer,qdisc_watchdog
+0x7c3a38ca	qdisc_watchdog_schedule_ns	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer,qdisc_watchdog
+0x8ac3fe70	qdisc_watchdog_cancel	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer,qdisc_watchdog
+0x8b1a7f93	qdisc_class_hash_grow	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x117093be	qdisc_class_hash_init	match	
+0xf53d4c26	qdisc_class_hash_destroy	match	
+0xc4212ab9	qdisc_class_hash_insert	match	
+0x91a7b1da	qdisc_class_hash_remove	match	
+0xb3c54368	qdisc_tree_reduce_backlog	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdcca56d9	default_qdisc_ops	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3154ade4	dev_trans_start	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfbb847ed	__netdev_watchdog_up	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x088821e8	netif_carrier_on	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xce0aa5f0	netif_carrier_off	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9b5da769	noop_qdisc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x619229de	pfifo_fast_ops	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd009cdc3	qdisc_create_dflt	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x335eaca7	qdisc_reset	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x255a324f	qdisc_put	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xcc0bca39	qdisc_put_unlocked	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x26198a6d	dev_graft_qdisc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2f90a398	dev_activate	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x61cd55fe	dev_deactivate	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb6e36ce2	psched_ratecfg_precompute	match	
+0x23318b26	mini_qdisc_pair_swap	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8deb8b64	mini_qdisc_pair_init	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x61d80363	pfifo_qdisc_ops	match	Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x005f189e	bfifo_qdisc_ops	match	Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xef829cab	fifo_set_limit	match	Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3f07ce36	fifo_create_dflt	match	Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2dbe41d1	gnet_stats_start_copy_compat	match	sk_buff,net_device,hrtimer
+0x1ce0ab1f	gnet_stats_start_copy	match	sk_buff,net_device,hrtimer
+0xa7904be1	__gnet_stats_copy_basic	match	
+0x45ac08a2	gnet_stats_copy_basic	match	sk_buff,net_device,hrtimer
+0x90ecfcaf	gnet_stats_copy_rate_est	match	sk_buff,net_device,hrtimer
+0x10c3f57e	__gnet_stats_copy_queue	match	
+0x5ea26533	gnet_stats_copy_queue	match	sk_buff,net_device,hrtimer
+0xd5d01887	gnet_stats_copy_app	match	sk_buff,net_device,hrtimer
+0x3d6e9b05	gnet_stats_finish_copy	match	sk_buff,net_device,hrtimer
+0xb7c6db70	sysctl_max_skb_frags	match	
+0x3e017894	__alloc_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xedcdf8fe	build_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1fe912f1	netdev_alloc_frag	match	
+0xf08c67de	napi_alloc_frag	match	
+0x7e533c31	__netdev_alloc_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x82b58fc3	__napi_alloc_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x02858feb	skb_add_rx_frag	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa8a27049	skb_coalesce_rx_frag	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x002cc3b2	__kfree_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7a424735	kfree_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb9e71101	kfree_skb_list	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x899e7f52	skb_tx_error	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x85086a89	consume_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x036753c0	napi_consume_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4fd44897	skb_morph	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x28b51087	mm_account_pinned_pages	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x045ee218	mm_unaccount_pinned_pages	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4d3a830c	sock_zerocopy_alloc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4d3b824e	sock_zerocopy_realloc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6864e88d	sock_zerocopy_callback	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9359f6da	sock_zerocopy_put	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x836f286d	sock_zerocopy_put_abort	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4c27aee9	skb_zerocopy_iter_stream	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x87b875ee	skb_copy_ubufs	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb4e5b255	skb_clone	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf53f3361	skb_headers_offset_update	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb3e9a538	skb_copy_header	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x04667c22	skb_copy	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x83b7a22d	__pskb_copy_fclone	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x00ec8cb9	pskb_expand_head	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0e3b7ed9	skb_realloc_headroom	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x284b8df9	skb_copy_expand	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x79aaedeb	__skb_pad	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x91f46895	pskb_put	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1d6d6447	skb_put	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe040c883	skb_push	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8760d2de	skb_pull	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf0699fcc	skb_trim	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xcc29e814	___pskb_trim	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x08ba4d71	pskb_trim_rcsum_slow	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0c855242	__pskb_pull_tail	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf19361dd	skb_copy_bits	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x97f600c9	skb_splice_bits	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x47182afc	skb_send_sock_locked	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x641be1d8	skb_send_sock	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa3045717	skb_store_bits	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x478d387e	__skb_checksum	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe8d4305c	skb_checksum	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x74603efd	skb_copy_and_csum_bits	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5be63c5b	crc32c_csum_stub	match	
+0x77de53d5	skb_zerocopy_headlen	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xce157c48	skb_zerocopy	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x792ce2ed	skb_copy_and_csum_dev	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5147ed53	skb_dequeue	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9bc0bea7	skb_dequeue_tail	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4e0f9752	skb_queue_purge	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xcf3013ab	skb_queue_head	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2a51f04c	skb_queue_tail	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xcfe8e20b	skb_unlink	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5b6fdf3a	skb_append	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8cd98516	skb_insert	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa4a8dcfb	skb_split	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x001363a2	skb_prepare_seq_read	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa6462110	skb_seq_read	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x32ed74c2	skb_abort_seq_read	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x688abcba	skb_find_text	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf46a0a69	skb_append_datato_frags	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1e1cef33	skb_append_pagefrags	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xde47372b	skb_pull_rcsum	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x034e341c	skb_segment	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3c650f96	skb_gro_receive	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7b07fbb4	skb_to_sgvec	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5e6c4cab	skb_to_sgvec_nomark	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa87bf8f4	skb_cow_data	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xaa4d72f6	sock_queue_err_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8a0554a2	sock_dequeue_err_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1513a5f8	skb_clone_sk	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4e7ed404	skb_complete_tx_timestamp	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3127e9da	__skb_tstamp_tx	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2ceb71ba	skb_tstamp_tx	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9a04358c	skb_complete_wifi_ack	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4adf6d89	skb_partial_csum_set	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1ddd7ae7	skb_checksum_setup	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9bcb06cf	skb_checksum_trimmed	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe4e16ae5	__skb_warn_lro_forwarding	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x12417ab0	kfree_skb_partial	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4d7b2dfb	skb_try_coalesce	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x02885864	skb_scrub_packet	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1f03a762	skb_gso_validate_network_len	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8374ce8c	skb_gso_validate_mac_len	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf0f00930	skb_vlan_untag	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbecf1b9a	skb_ensure_writable	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbc9493dd	__skb_vlan_pop	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x56280241	skb_vlan_pop	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3999b687	skb_vlan_push	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa4b6d61c	alloc_skb_with_frags	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x50a75c99	pskb_extract	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x295b2d27	skb_condense	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb6c3e5cf	sk_ns_capable	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x741aabb2	sk_capable	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc0789670	sk_net_capable	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfac8865f	sysctl_wmem_max	match	
+0xb05fc310	sysctl_rmem_max	match	
+0xa108eb4d	sysctl_optmem_max	match	
+0xde75ed73	memalloc_socks_key	match	
+0xd677e7da	sk_set_memalloc	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x86ce95df	sk_clear_memalloc	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9ad490eb	__sk_backlog_rcv	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc322d599	__sock_queue_rcv_skb	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4c8dd4d0	sock_queue_rcv_skb	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x677f26c0	__sk_receive_skb	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa30b70af	__sk_dst_check	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x007069aa	sk_dst_check	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x14113e66	sk_mc_loop	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x937cd82c	sock_setsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xed5f0991	sk_alloc	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x76b9f0a2	sk_free	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf417703a	sk_clone_lock	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf8b4c2a9	sk_free_unlock_clone	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x66023475	sk_setup_caps	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfc2ec937	sock_wfree	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfdf35e69	skb_set_owner_w	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc4086cfc	skb_orphan_partial	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x787d8b61	sock_rfree	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7892b6c8	sock_efree	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x088d0bd4	sock_i_uid	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7444e60d	sock_i_ino	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb72e0bfe	sock_wmalloc	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5345265d	sock_kmalloc	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x34936125	sock_kfree_s	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2bc992f5	sock_kzfree_s	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8284dc63	sock_alloc_send_pskb	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5f760878	sock_alloc_send_skb	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x025994f0	__sock_cmsg_send	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfd6ae153	sock_cmsg_send	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3a82f402	skb_page_frag_refill	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x994fd522	sk_page_frag_refill	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdd82fe5b	sk_alloc_sg	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5837f847	sk_wait_data	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x74e02d8e	__sk_mem_raise_allocated	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf3554957	__sk_mem_schedule	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbe37c40b	__sk_mem_reduce_allocated	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1412a23d	__sk_mem_reclaim	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x399e8ef4	sk_set_peek_off	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe4957ae5	sock_no_bind	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3aa86040	sock_no_connect	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb266a414	sock_no_socketpair	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8efcf9c3	sock_no_accept	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb2c621fa	sock_no_getname	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x54c738af	sock_no_ioctl	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xca3ce54a	sock_no_listen	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbaf9a3ad	sock_no_shutdown	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8616b58d	sock_no_setsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1fa0ce47	sock_no_getsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4931a87d	sock_no_sendmsg	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xae7c9043	sock_no_sendmsg_locked	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa3731a70	sock_no_recvmsg	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x31effc07	sock_no_mmap	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa6ac55fe	sock_no_sendpage	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe4a1c247	sock_no_sendpage_locked	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc39d3717	sk_send_sigurg	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x58d4fe66	sk_reset_timer	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa0535eff	sk_stop_timer	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb7c2b2d2	sock_init_data	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x65ab7b38	lock_sock_nested	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe32aa135	release_sock	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5f0d5643	lock_sock_fast	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x506b4f87	sock_get_timestamp	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf6a8467f	sock_get_timestampns	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x65cc2bae	sock_recv_errqueue	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x94b8f8b9	sock_common_getsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xea33c64f	compat_sock_common_getsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf9fddd5d	sock_common_recvmsg	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0abcfdc0	sock_common_setsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7eb4c2d2	compat_sock_common_setsockopt	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc7c42ef9	sk_common_release	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0705d157	sock_prot_inuse_add	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xebe6491f	sock_prot_inuse_get	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x698dcc69	sock_inuse_get	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe261f282	proto_register	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf8119b0b	proto_unregister	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf665f74f	sock_load_diag_module	match	
+0xe590dea3	sk_busy_loop_end	match	
+0xa5976e4f	dev_base_lock	match	
+0x2be0c74c	softnet_data	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2d6a1a3a	dev_add_pack	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xcd9b9ac5	__dev_remove_pack	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf0c55cde	dev_remove_pack	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd6cdfe43	dev_add_offload	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb1c2cd03	dev_remove_offload	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe2297d78	netdev_boot_setup_check	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc4ee4290	dev_get_iflink	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8f0c3936	dev_fill_metadata_dst	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa1a801f9	__dev_get_by_name	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb54a813a	dev_get_by_name_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2a901f50	dev_get_by_name	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5fdd2491	__dev_get_by_index	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x52adc6fd	dev_get_by_index_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xed7dbb5c	dev_get_by_index	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfaf5d088	dev_get_by_napi_id	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x367271b5	dev_getbyhwaddr_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2b64af66	__dev_getfirstbyhwtype	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6b82984d	dev_getfirstbyhwtype	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x78e8fdb0	__dev_get_by_flags	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x62849ac7	dev_valid_name	match	
+0x2414aa8b	dev_alloc_name	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x26245691	dev_get_valid_name	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x906d10d7	dev_set_alias	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x81b7aae1	netdev_features_change	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x841b7325	netdev_state_change	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x93ad231b	netdev_notify_peers	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb0664e79	dev_open	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x58b4645c	dev_close_many	match	
+0x400c408f	dev_close	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9ac70b02	dev_disable_lro	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfe8d22f1	netdev_cmd_to_name	match	
+0xd2da1048	register_netdevice_notifier	match	
+0x9d0d6206	unregister_netdevice_notifier	match	
+0x243db9b4	call_netdevice_notifiers	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2c3054f9	net_inc_ingress_queue	match	
+0x46013233	net_dec_ingress_queue	match	
+0x07be6905	net_inc_egress_queue	match	
+0x86f85114	net_dec_egress_queue	match	
+0x54e6fcdd	net_enable_timestamp	match	
+0x199ed0cd	net_disable_timestamp	match	
+0x2adaf43a	is_skb_forwardable	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5801f630	__dev_forward_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x385fb15e	dev_forward_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x518cac82	dev_queue_xmit_nit	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3421bd5d	netdev_txq_to_tc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xeeffa34b	xps_needed	match	
+0x3cb37157	xps_rxqs_needed	match	
+0xe47ad1c9	__netif_set_xps_queue	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3fa77cb5	netif_set_xps_queue	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc65f1ad7	netdev_reset_tc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf982720a	netdev_set_tc_queue	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa5cf83ab	netdev_set_num_tc	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x466a9d80	netdev_unbind_sb_channel	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc2a02eef	netdev_bind_sb_channel_queue	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbeb086ae	netdev_set_sb_channel	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa82b4779	netif_set_real_num_tx_queues	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2c32f009	netif_set_real_num_rx_queues	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0274dc2b	netif_get_num_default_rss_queues	match	
+0x01289232	__netif_schedule	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xed7d5868	netif_schedule_queue	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4ace5c16	netif_tx_wake_queue	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x08376a13	__dev_kfree_skb_irq	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0d13081d	__dev_kfree_skb_any	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x70c2f918	netif_device_detach	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe0071fc9	netif_device_attach	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5f9fcd27	skb_checksum_help	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbfc9733c	skb_mac_gso_segment	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x865383bd	__skb_gso_segment	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3e8b8b5e	netdev_rx_csum_fault	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3abb040e	passthru_features_check	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3d0bad4f	netif_skb_features	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x29c430e4	skb_csum_hwoffload_help	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd274ac82	validate_xmit_skb_list	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x075663de	dev_loopback_xmit	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdf5481d7	dev_pick_tx_zero	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa05965d0	dev_pick_tx_cpu_id	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x256b5a54	dev_queue_xmit	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8425fa7d	dev_queue_xmit_accel	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbfc9c5d0	dev_direct_xmit	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9ffa3a75	netdev_max_backlog	match	
+0xf24bc9d7	rps_sock_flow_table	match	
+0x56802ae8	rps_cpu_mask	match	
+0x0c50fbcf	rps_needed	match	
+0x26e00a60	rfs_needed	match	
+0xd1c2160a	rps_may_expire_flow	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2b198165	generic_xdp_tx	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6faa4fde	do_xdp_generic	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x400df419	netif_rx	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5414cd91	netif_rx_ni	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6a8c38fb	netdev_is_rx_handler_busy	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x75231f97	netdev_rx_handler_register	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8efae13d	netdev_rx_handler_unregister	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x336614b5	netif_receive_skb_core	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7d51c44a	netif_receive_skb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6b8bf149	netif_receive_skb_list	match	
+0xdebd9500	napi_gro_flush	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7f1c7242	gro_find_receive_by_type	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xcaec12e8	gro_find_complete_by_type	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x48c221c9	napi_gro_receive	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x175d731b	napi_get_frags	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8790d19d	napi_gro_frags	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x11f61723	__skb_gro_checksum_complete	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x78f4821b	__napi_schedule	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xba27b858	napi_schedule_prep	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf9f7129b	__napi_schedule_irqoff	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8d9fd8ac	napi_complete_done	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc81e91a8	napi_busy_loop	match	
+0xd7de3e4a	napi_hash_del	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x8492df05	netif_napi_add	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfae124fd	napi_disable	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0699efa2	netif_napi_del	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa0f5f8ff	get_current_napi_context	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xff85020f	netdev_has_upper_dev	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x01fc2546	netdev_has_upper_dev_all_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x62806477	netdev_has_any_upper_dev	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x5c07c264	netdev_master_upper_dev_get	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa0dad88e	netdev_adjacent_get_private	match	
+0x1fb8c412	netdev_upper_get_next_dev_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2ca419b9	netdev_walk_all_upper_dev_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb97dc349	netdev_lower_get_next_private	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9fe921d4	netdev_lower_get_next_private_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2d7e3159	netdev_lower_get_next	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x85c7c2f2	netdev_walk_all_lower_dev	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2f23356e	netdev_walk_all_lower_dev_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc16c24ad	netdev_lower_get_first_private_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x75ffc26f	netdev_master_upper_dev_get_rcu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2a86a05b	netdev_upper_dev_link	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9246c3f7	netdev_master_upper_dev_link	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4c4ea648	netdev_upper_dev_unlink	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdd7ecafc	netdev_bonding_info_change	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x19bf0ee5	netdev_lower_dev_get_private	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfd38cd9d	dev_get_nest_level	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xfaabf433	netdev_lower_state_changed	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa870844f	dev_set_promiscuity	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x061e1e8c	dev_set_allmulti	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xce7ac0c9	dev_get_flags	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x98f6667c	dev_change_flags	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb49ef7ee	__dev_set_mtu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9073a7d5	dev_set_mtu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa4ee5085	dev_set_group	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x19fa5503	dev_set_mac_address	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x277e27ab	dev_change_carrier	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x76479c1e	dev_get_phys_port_id	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb0f6335a	dev_get_phys_port_name	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2d010c87	dev_change_proto_down	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd4dbd980	netdev_update_features	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4989218c	netdev_change_features	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9ab7de9e	netif_stacked_transfer_operstate	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xbdaee7d3	netif_tx_stop_all_queues	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf17cfabd	register_netdevice	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x66122fd1	init_dummy_netdev	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb85d9dd7	register_netdev	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc2fa4f28	netdev_refcnt_read	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xad995dac	netdev_stats_to_stats64	match	
+0x4d44dde0	dev_get_stats	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdcdcf463	netdev_set_default_ethtool_ops	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd908a40a	alloc_netdev_mqs	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xf99d877a	free_netdev	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x609f1c7e	synchronize_net	match	
+0x74239afe	unregister_netdevice_queue	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9fdecc31	unregister_netdevice_many	match	
+0xa7d77d1c	unregister_netdev	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x84fe1e60	dev_change_net_namespace	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x69668826	netdev_increment_features	match	
+0x9f851e1c	netdev_printk	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0d74b271	netdev_emerg	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb2ad3007	netdev_alert	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x58812053	netdev_crit	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1ba626e8	netdev_err	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd0ee5845	netdev_warn	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xafacda36	netdev_notice	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x7cc368c0	netdev_info	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc7a4fbed	rtnl_lock	match	
+0x6b55acd0	rtnl_lock_killable	match	
+0x6d3916f6	rtnl_kfree_skbs	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6e720ff2	rtnl_unlock	match	
+0xf4f14de6	rtnl_trylock	match	
+0x85670f1d	rtnl_is_locked	match	
+0xa74c9877	refcount_dec_and_rtnl_lock	match	
+0xb1896253	rtnl_register_module	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x07b52e38	rtnl_unregister	match	
+0x579e0bf5	rtnl_unregister_all	match	
+0x264b73f3	__rtnl_link_register	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9856bda2	rtnl_link_register	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9213d881	__rtnl_link_unregister	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xd536c89f	rtnl_link_unregister	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xcbe3a340	rtnl_af_register	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9d45af6f	rtnl_af_unregister	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe61f1915	rtnl_unicast	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xaa48dd44	rtnl_notify	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc74adf41	rtnl_set_sk_err	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x3800283f	rtnetlink_put_metrics	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9863c14b	rtnl_put_cacheinfo	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe1e7e40c	rtnl_nla_parse_ifla	match	
+0xc3921234	rtnl_link_get_net	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x87ed48f6	rtnl_delete_link	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x9f9cc34c	rtnl_configure_link	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xb7c8eaf4	rtnl_create_link	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4fd60b33	ndo_dflt_fdb_add	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa9807ea3	ndo_dflt_fdb_del	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe1e3c312	ndo_dflt_fdb_dump	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x2feb4a4b	ndo_dflt_bridge_getlink	match	sock,tcp_congestion_ops,rate_sample,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe52ae8b5	skb_flow_dissector_init	match	
+0xfff42798	__skb_flow_get_ports	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x21e6d895	skb_flow_dissect_tunnel_info	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x6ccbeae0	__skb_flow_dissect	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xecda7997	flow_get_u32_src	match	
+0x65d2e20c	flow_get_u32_dst	match	
+0xebfae617	flow_hash_from_keys	match	
+0xf7a704b5	make_flow_keys_digest	match	
+0xac30fc31	__skb_get_hash_symmetric	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xc133918e	__skb_get_hash	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0d4fc845	skb_get_hash_perturb	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x4ec9b719	__get_hash_from_flowi6	match	
+0xc2fb064b	flow_keys_dissector	match	
+0xca657c48	flow_keys_basic_dissector	match	
+0xe2e018f8	nla_validate	match	
+0x6a3de870	nla_policy_len	match	
+0x43dae11a	nla_parse	match	
+0xcd279169	nla_find	match	
+0x6b640864	nla_strlcpy	match	
+0x3464b72d	nla_strdup	match	
+0xf1db1704	nla_memcpy	match	
+0x652ce9aa	nla_memcmp	match	
+0xedbaee5e	nla_strcmp	match	
+0xbb16a35e	__nla_reserve	match	sk_buff
+0x2eca723a	__nla_reserve_64bit	match	sk_buff
+0x57abcc29	__nla_reserve_nohdr	match	sk_buff
+0xe666b276	nla_reserve	match	sk_buff
+0x2adbe78e	nla_reserve_64bit	match	sk_buff
+0x79aebe5a	nla_reserve_nohdr	match	sk_buff
+0x858aa3c4	__nla_put	match	sk_buff
+0x49eb2fdf	__nla_put_64bit	match	sk_buff
+0x214747dc	__nla_put_nohdr	match	sk_buff
+0x97cdc797	nla_put	match	sk_buff
+0x1c5334b7	nla_put_64bit	match	sk_buff
+0x3300238f	nla_put_nohdr	match	sk_buff
+0x9fe15b35	nla_append	match	sk_buff
+0x551bd071	__rb_erase_color	match	
+0xa5526619	rb_insert_color	match	
+0x4d9b652b	rb_erase	match	
+0xc188721f	rb_insert_color_cached	match	
+0xbaed012b	rb_erase_cached	match	
+0xa1716baf	__rb_insert_augmented	match	
+0xece784c2	rb_first	match	
+0xdf2c2742	rb_last	match	
+0xca9360b5	rb_next	match	
+0xf82ec573	rb_prev	match	
+0x7fe32873	rb_replace_node	match	
+0x601cb54d	rb_replace_node_cached	match	
+0x7adc0fbf	rb_replace_node_rcu	match	
+0x4e68e9be	rb_next_postorder	match	
+0xee91879b	rb_first_postorder	match	
+0x2506844e	gether_setup_name	match	sk_buff,net_device,usb_gadget,usb_ep,usb_request,hrtimer
+0x83799e9b	gether_setup_name_default	match	sk_buff,net_device,hrtimer
+0x15b3bd0e	gether_register_netdev	match	sk_buff,net_device,hrtimer
+0xa692130d	gether_set_gadget	match	sk_buff,net_device,usb_gadget,usb_ep,usb_request,hrtimer
+0x2e2522f4	gether_set_dev_addr	match	sk_buff,net_device,hrtimer
+0x4b70ccaa	gether_get_dev_addr	match	sk_buff,net_device,hrtimer
+0xfda25ffe	gether_set_host_addr	match	sk_buff,net_device,hrtimer
+0x73403f28	gether_get_host_addr	match	sk_buff,net_device,hrtimer
+0x213b4e8a	gether_get_host_addr_cdc	match	sk_buff,net_device,hrtimer
+0x45fe3e5c	gether_get_host_addr_u8	match	sk_buff,net_device,hrtimer
+0xde1afc07	gether_set_qmult	match	sk_buff,net_device,hrtimer
+0xb533a0f6	gether_get_qmult	match	sk_buff,net_device,hrtimer
+0xbbc226e2	gether_get_ifname	match	sk_buff,net_device,hrtimer
+0x8878cfa6	gether_cleanup	match	
+0xd0d70d08	gether_connect	match	sk_buff,net_device,usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,gether,config_group,hrtimer
+0x0771da2c	gether_disconnect	match	sk_buff,net_device,usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,gether,config_group,hrtimer
+0x2873fc8a	usb_get_function_instance	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x41634ae7	usb_get_function	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x4ce5702f	usb_put_function_instance	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0xa3d5e35d	usb_put_function	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0xc98920bb	usb_function_register	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0xd93b94ff	usb_function_unregister	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0xb7cfa263	config_ep_by_speed_and_alt	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x9b01cf01	config_ep_by_speed	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x8ee07447	usb_add_function	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x129e9b05	usb_remove_function	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x9fab011c	usb_function_deactivate	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x00015623	usb_function_activate	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x089cda2a	usb_interface_id	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x73d08f79	usb_func_wakeup	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x6a5263aa	usb_func_ep_queue	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0xd2bb4840	usb_add_config_only	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x9c6fc99a	usb_add_config	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x9eea5cef	usb_string_id	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0xe96d61c0	usb_string_ids_tab	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x0648b1ac	usb_gstrings_attach	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x792a310c	usb_string_ids_n	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0xa6941ffc	usb_composite_probe	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0xb4f3a5b1	usb_composite_unregister	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x482213bb	usb_composite_setup_continue	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x8cf5c2ae	usb_composite_overwrite_options	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0xd2ea2134	usb_descriptor_fillbuf	match	
+0xf474a207	usb_gadget_config_buf	match	
+0x2e09263f	usb_copy_descriptors	match	
+0x08f5d034	usb_assign_descriptors	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x3b5ea430	usb_free_all_descriptors	match	usb_function,usb_function_instance,usb_configuration,usb_composite_dev,usb_gadget,usb_ep,usb_request,config_group,hrtimer
+0x4ab26c53	usb_otg_descriptor_alloc	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x92c97fa6	usb_otg_descriptor_init	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x4beb505d	usb_gadget_get_string	match	
+0x3043cb18	usb_ep_autoconfig_ss	match	usb_gadget,usb_ep,usb_request,hrtimer
+0xa7fdd50f	usb_ep_autoconfig	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x1d7054d9	usb_ep_autoconfig_release	match	usb_ep,usb_request
+0xfb4b59a9	usb_ep_autoconfig_reset	match	usb_gadget,usb_ep,usb_request,hrtimer
+0xaf0d0544	usb_ep_autoconfig_by_name	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x1dc812d0	create_function_device	match	hrtimer
+0xbce2f54b	usb_os_desc_prepare_interf_dir	match	config_group,hrtimer
+0x2c00bddf	unregister_gadget_item	match	config_group,hrtimer
+0xcf677940	usb_ep_set_maxpacket_limit	match	usb_ep,usb_request
+0xe0013794	usb_ep_enable	match	usb_ep,usb_request
+0x9b4a6b56	usb_ep_disable	match	usb_ep,usb_request
+0xdcb8cf40	usb_ep_alloc_request	match	usb_ep,usb_request
+0xb0661cae	usb_ep_free_request	match	usb_ep,usb_request
+0x6c4236e5	usb_ep_queue	match	usb_ep,usb_request
+0xc2d3d7d4	usb_ep_dequeue	match	usb_ep,usb_request
+0x1ac1baa0	usb_ep_set_halt	match	usb_ep,usb_request
+0x698e3f22	usb_ep_clear_halt	match	usb_ep,usb_request
+0x57b09a55	usb_ep_set_wedge	match	usb_ep,usb_request
+0xa45743d6	usb_ep_fifo_status	match	usb_ep,usb_request
+0x5137f69c	usb_ep_fifo_flush	match	usb_ep,usb_request
+0xac8d6712	usb_gadget_frame_number	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x03850755	usb_gadget_wakeup	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x3456f7ce	usb_gsi_ep_op	match	usb_ep,usb_request,hrtimer
+0x36990a77	usb_gadget_func_wakeup	match	usb_gadget,usb_ep,usb_request,hrtimer
+0xece1c9dd	usb_gadget_set_selfpowered	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x8fdf5d3e	usb_gadget_clear_selfpowered	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x7c67a19e	usb_gadget_vbus_connect	match	usb_gadget,usb_ep,usb_request,hrtimer
+0xbc680a8b	usb_gadget_vbus_draw	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x88a11778	usb_gadget_vbus_disconnect	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x0120844c	usb_gadget_connect	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x06e7f28f	usb_gadget_disconnect	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x1caa0b79	usb_gadget_deactivate	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x6992ad68	usb_gadget_activate	match	usb_gadget,usb_ep,usb_request,hrtimer
+0xd8b89705	usb_gadget_map_request_by_dev	match	usb_ep,usb_request,hrtimer
+0xde8c02c6	usb_gadget_map_request	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x90addfa5	usb_gadget_unmap_request_by_dev	match	usb_ep,usb_request,hrtimer
+0x32e8d6e4	usb_gadget_unmap_request	match	usb_gadget,usb_ep,usb_request,hrtimer
+0xd633eaf8	usb_gadget_giveback_request	match	usb_ep,usb_request
+0x25192949	gadget_find_ep_by_name	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x9a4a1b3c	usb_gadget_ep_match_desc	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x59d8f59a	usb_gadget_set_state	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x8d5ecfd8	usb_udc_vbus_handler	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x01424f1b	usb_gadget_udc_reset	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x998effed	usb_add_gadget_udc_release	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x50b88f41	usb_get_gadget_udc_name	match	
+0x870822e6	usb_add_gadget_udc	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x38c86cba	usb_del_gadget_udc	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x1cd9ecb4	usb_gadget_probe_driver	match	usb_gadget,usb_ep,usb_request,hrtimer
+0x2899b0dc	usb_gadget_unregister_driver	match	usb_gadget,usb_ep,usb_request,hrtimer
+0xf7f756da	config_item_set_name	match	config_group
+0x87e696b4	config_item_init_type_name	match	config_group
+0xe47b0aa9	config_group_init_type_name	match	config_group
+0xb66c73d7	config_item_get	match	config_group
+0xdf8fffd0	config_item_get_unless_zero	match	config_group
+0x6f329192	config_item_put	match	config_group
+0x63e0d65b	config_group_init	match	config_group
+0x9988ae8a	config_group_find_item	match	config_group
+0x03952887	ktime_add_safe	match	
+0x406c4cb1	hrtimer_resolution	match	
+0xa988ce9b	hrtimer_forward	match	hrtimer
+0xc38b7856	hrtimer_start_range_ns	match	hrtimer
+0x3094c67f	hrtimer_try_to_cancel	match	hrtimer
+0xd46f0d01	hrtimer_cancel	match	hrtimer
+0xc40e9952	__hrtimer_get_remaining	match	hrtimer
+0x7cf15872	hrtimer_init	match	hrtimer
+0xa16cffd1	hrtimer_active	match	hrtimer
+0xcd7768af	hrtimer_init_sleeper	match	hrtimer
+0x1f37cca7	schedule_hrtimeout_range	match	
+0xdd01082e	schedule_hrtimeout	match	
+0x50ad4c30	eth_header	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe0a4e6ce	eth_get_headlen	match	
+0xbd034302	eth_type_trans	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x1bfd685f	eth_header_parse	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa205fb7b	eth_header_cache	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdf161f2c	eth_header_cache_update	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xdd7c96ce	eth_prepare_mac_addr_change	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xa7b1d986	eth_commit_mac_addr_change	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe71567a0	eth_mac_addr	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x39c6262b	eth_change_mtu	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x51c3903d	eth_validate_addr	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x80fefa3c	ether_setup	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x608579eb	alloc_etherdev_mqs	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xcdf306f3	devm_alloc_etherdev_mqs	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x81533963	sysfs_format_mac	match	
+0xd5b320d6	eth_gro_receive	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x0be297b1	eth_gro_complete	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0x08dfac55	eth_platform_get_mac_address	match	sock,Qdisc,Qdisc_ops,sk_buff,net_device,hrtimer
+0xe719502a	module_mutex	match	
+0xd6fde043	is_module_sig_enforced	match	
+0xf353a698	register_module_notifier	match	
+0x6a5ecb18	unregister_module_notifier	match	
+0x90b5dc0a	__module_put_and_exit	match	hrtimer
+0x654e8870	find_module	match	hrtimer
+0xed94b3e8	__tracepoint_module_get	match	
+0x68097dc6	module_refcount	match	hrtimer
+0x6e9dd606	__symbol_put	match	
+0x66d87d38	symbol_put_addr	match	
+0xa6cc3707	__module_get	match	hrtimer
+0xad57bc93	try_module_get	match	hrtimer
+0xb950078a	module_put	match	hrtimer
+0x868784cb	__symbol_get	match	
+0x9d7fbf35	module_layout	match	hrtimer

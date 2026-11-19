@@ -1,0 +1,22 @@
+exported symbols recomputed: 754, equal to running kernel: 754
+  sock                       full definition covered by 499 symbol CRCs, 499 match
+  tcp_sock                   full definition covered by 2 symbol CRCs, 2 match
+  inet_connection_sock       full definition covered by 2 symbol CRCs, 2 match
+  tcp_congestion_ops         full definition covered by 207 symbol CRCs, 207 match
+  rate_sample                full definition covered by 207 symbol CRCs, 207 match
+  Qdisc                      full definition covered by 503 symbol CRCs, 503 match
+  Qdisc_ops                  full definition covered by 503 symbol CRCs, 503 match
+  sk_buff                    full definition covered by 538 symbol CRCs, 538 match
+  net_device                 full definition covered by 525 symbol CRCs, 525 match
+  usb_function               full definition covered by 29 symbol CRCs, 29 match
+  usb_function_instance      full definition covered by 29 symbol CRCs, 29 match
+  usb_configuration          full definition covered by 29 symbol CRCs, 29 match
+  usb_composite_dev          full definition covered by 29 symbol CRCs, 29 match
+  usb_gadget                 full definition covered by 61 symbol CRCs, 61 match
+  usb_ep                     full definition covered by 78 symbol CRCs, 78 match
+  usb_request                full definition covered by 78 symbol CRCs, 78 match
+  gether                     full definition covered by 2 symbol CRCs, 2 match
+  config_group               full definition covered by 39 symbol CRCs, 39 match
+  hrtimer                    full definition covered by 603 symbol CRCs, 603 match
+  qdisc_watchdog             full definition covered by 4 symbol CRCs, 4 match
+  minmax                     full definition covered by 3 symbol CRCs, 3 match

@@ -1,0 +1,7 @@
+ffffff8008080000 T _text
+ffffff80098688b0 R __start___ksymtab
+ffffff80098747f0 R __start___ksymtab_gpl
+ffffff800987fa08 R __start___kcrctab
+ffffff800987fa08 R __stop___ksymtab_gpl
+ffffff80098859a8 R __start___kcrctab_gpl
+ffffff800988b2b4 R __start___kcrctab_gpl_future

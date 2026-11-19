@@ -1,0 +1,7 @@
+# Fix-ups for running a generic Android 15 system image on this machine. Added 2026-11-19.
+# No cellular modem here; the vendor radio daemon crashes every 5 s under the generic system.
+on boot
+    stop vendor.ril-daemon
+
+on property:sys.boot_completed=1
+    stop vendor.ril-daemon

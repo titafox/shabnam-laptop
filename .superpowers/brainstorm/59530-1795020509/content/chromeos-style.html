@@ -1,0 +1,90 @@
+<style>
+.scr{position:relative;aspect-ratio:16/9;width:100%;border-radius:8px;overflow:hidden;font-family:-apple-system,"PingFang SC",sans-serif;color:#e8eaed;
+  background:
+   radial-gradient(60% 80% at 85% 15%,rgba(120,170,255,.55),transparent 60%),
+   radial-gradient(70% 90% at 10% 90%,rgba(60,200,180,.40),transparent 60%),
+   linear-gradient(135deg,#1b2a4a,#0e1626)}
+.scr *{box-sizing:border-box}
+.ic{aspect-ratio:1;border-radius:50%;flex:none;display:block}
+.c1{background:#4f8ef7}.c2{background:#34c08b}.c3{background:#f5a623}.c4{background:#e5546b}.c5{background:#8e6cf0}.c6{background:#29b6c9}.c7{background:#9aa0a6}.c8{background:#ff7a45}
+.shelf{position:absolute;left:0;right:0;bottom:0;height:8.5%;display:flex;align-items:center;justify-content:center;gap:1%;background:rgba(20,22,28,.55)}
+.shelf .ic{height:64%}
+.shelf .on{position:relative}
+.shelf .on:after{content:"";position:absolute;left:50%;bottom:-22%;width:22%;height:8%;border-radius:9px;background:#fff;transform:translateX(-50%)}
+.home{position:absolute;left:1%;top:50%;transform:translateY(-50%);height:64%;aspect-ratio:1;border-radius:50%;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center}
+.home i{width:38%;aspect-ratio:1;border-radius:50%;border:.22vw solid #fff}
+.tray{position:absolute;right:1%;top:50%;transform:translateY(-50%);height:60%;border-radius:999px;background:rgba(255,255,255,.14);display:flex;align-items:center;gap:.7vw;padding:0 1.1vw;font-size:.95vw}
+.dot{width:.7vw;height:.7vw;border-radius:50%;background:#e8eaed;opacity:.9}
+.panel{position:absolute;background:rgba(32,33,36,.94);border-radius:1.2vw;box-shadow:0 1vw 3vw rgba(0,0,0,.45)}
+.launch{left:1%;bottom:10%;width:36%;height:74%;padding:1.4vw}
+.search{height:3vw;border-radius:999px;background:rgba(255,255,255,.09);display:flex;align-items:center;padding-left:1.2vw;font-size:.95vw;color:#bdc1c6;margin-bottom:1.2vw}
+.lab{font-size:.75vw;color:#9aa0a6;margin:.2vw 0 .7vw}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:1.1vw .6vw}
+.grid div{display:flex;flex-direction:column;align-items:center;gap:.35vw;font-size:.72vw;color:#e8eaed}
+.grid .ic{width:52%}
+.qs{right:1%;bottom:10%;width:27%;padding:1.2vw}
+.pills{display:grid;grid-template-columns:1fr 1fr;gap:.6vw;margin-bottom:1vw}
+.pill{height:3.4vw;border-radius:999px;background:rgba(255,255,255,.09);display:flex;align-items:center;gap:.6vw;padding:0 .9vw;font-size:.8vw}
+.pill.on{background:#8ab4f8;color:#202124}
+.pill .dot{background:currentColor}
+.sl{height:.5vw;border-radius:9px;background:rgba(255,255,255,.14);margin:1vw 0;position:relative}
+.sl:before{content:"";position:absolute;left:0;top:0;bottom:0;border-radius:9px;background:#8ab4f8;width:var(--w)}
+.qf{display:flex;justify-content:space-between;font-size:.78vw;color:#bdc1c6;margin-top:1vw}
+.cap{margin:.5rem 0 1.6rem;font-size:.9rem;opacity:.8}
+</style>
+
+<h2>ChromeOS 风格：这样对吗？</h2>
+<p class="subtitle">两个画面：点左下角圆形按钮（或按键盘开始键）弹出启动器；点右下角状态胶囊弹出快捷设置。壁纸上不摆图标，保持干净。</p>
+
+<div class="scr">
+  <div class="panel launch">
+    <div class="search">搜索应用、网址…</div>
+    <div class="lab">最近使用</div>
+    <div class="grid" style="margin-bottom:1.2vw">
+      <div><span class="ic c1"></span>浏览器</div><div><span class="ic c3"></span>文件</div><div><span class="ic c2"></span>文档</div><div><span class="ic c5"></span>播放器</div><div><span class="ic c7"></span>设置</div>
+    </div>
+    <div class="lab">全部应用</div>
+    <div class="grid">
+      <div><span class="ic c6"></span>终端</div><div><span class="ic c4"></span>相册</div><div><span class="ic c8"></span>计算器</div><div><span class="ic c2"></span>表格</div><div><span class="ic c1"></span>邮件</div>
+      <div><span class="ic c5"></span>音乐</div><div><span class="ic c3"></span>便签</div><div><span class="ic c7"></span>时钟</div><div><span class="ic c4"></span>应用商店</div><div><span class="ic c6"></span>相机</div>
+    </div>
+  </div>
+  <div class="shelf">
+    <span class="home"><i></i></span>
+    <span class="ic c1 on"></span><span class="ic c3"></span><span class="ic c2"></span><span class="ic c5"></span><span class="ic c7"></span><span class="ic c4"></span>
+    <span class="tray"><span class="dot"></span><span class="dot"></span>14:32</span>
+  </div>
+</div>
+<p class="cap">画面一 · 启动器：顶部搜索框（弹出后直接打字）、最近使用一行、下面是全部应用，可滚动。右键或长按图标：固定到底栏、应用信息、卸载。</p>
+
+<div class="scr">
+  <div class="panel qs">
+    <div class="pills">
+      <div class="pill on"><span class="dot"></span>Wi-Fi</div><div class="pill"><span class="dot"></span>蓝牙</div>
+      <div class="pill"><span class="dot"></span>深色模式</div><div class="pill"><span class="dot"></span>截图</div>
+    </div>
+    <div class="sl" style="--w:70%"></div>
+    <div class="sl" style="--w:45%"></div>
+    <div class="qf"><span>电量 82% · 11月18日 周三</span><span>设置 ⚙</span></div>
+  </div>
+  <div class="shelf">
+    <span class="home"><i></i></span>
+    <span class="ic c1"></span><span class="ic c3"></span><span class="ic c2"></span><span class="ic c5"></span><span class="ic c7"></span><span class="ic c4"></span>
+    <span class="tray"><span class="dot"></span><span class="dot"></span>14:32</span>
+  </div>
+</div>
+<p class="cap">画面二 · 快捷设置：Wi-Fi、蓝牙等开关（无 root 时部分开关只能跳到系统对应设置页），亮度和音量两条滑块，底部电量、日期和设置入口。</p>
+
+<div class="section">
+  <h3>待你定的一件事：底栏在应用里也要一直显示吗？</h3>
+  <div class="options">
+    <div class="option" data-choice="shelf-home-only" onclick="toggleSelect(this)">
+      <div class="letter">1</div>
+      <div class="content"><h3>只在桌面显示</h3><p>打开应用后是系统自带的返回 / 主页 / 最近任务键。最简单、最稳、零额外开销。</p></div>
+    </div>
+    <div class="option" data-choice="shelf-always" onclick="toggleSelect(this)">
+      <div class="letter">2</div>
+      <div class="content"><h3>始终显示（悬浮在应用上方）</h3><p>像真正的 ChromeOS，随时切应用。但它会盖住应用底部一条，应用自己不知道要让位，全屏视频时需要自动隐藏；要显示"正在运行的应用"还得你手动多授一个使用情况权限。</p></div>
+    </div>
+  </div>
+</div>

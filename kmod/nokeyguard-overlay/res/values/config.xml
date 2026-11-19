@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- This laptop has no lock screen. Pointing the system at a keyguard service that does not exist
+         stops it waiting ~2.4 s at boot for SystemUI's keyguard before ending the boot animation.
+         Installed as /vendor/overlay/NoKeyguardWait.apk; delete that file to undo. -->
+    <string name="config_keyguardComponent" translatable="false">local.cloud.overlay.nokeyguard/local.cloud.overlay.nokeyguard.None</string>
+</resources>

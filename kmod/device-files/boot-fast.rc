@@ -1,0 +1,17 @@
+# Boot speed-ups for this laptop (2026-11-19).
+on early-init
+    # SurfaceFlinger spends ~10 s pre-compiling shaders at start while system_server waits for the display
+    setprop service.sf.prime_shader_cache 0
+
+on fs
+    # Boot animation: the system image has none of ours; bootanimation looks at /oem/media/bootanimation.zip
+    mount none /vendor/oem /oem bind
+    # The image's rw-system.sh is a 1200-line list of quirks for other phones that blocks boot ~4 s
+    mount none /vendor/bin/noop.sh /system/bin/rw-system.sh bind
+    # No fingerprint reader: the image declares one and system_server then looks for its HAL every second
+    mount none /vendor/etc/empty-permissions.xml /system/etc/permissions/android.hardware.fingerprint.xml bind
+    # the few generic things the skipped rw-system.sh used to set
+    setprop ro.bluetooth.library_name libbluetooth.so
+    setprop ro.config.media_vol_steps 25
+    setprop ro.config.media_vol_default 8
+    setprop ro.surface_flinger.use_color_management false

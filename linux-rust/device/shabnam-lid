@@ -16,7 +16,7 @@ state() {
 }
 running() { [ -s $PID ] && kill -0 "$(cat $PID)" 2>/dev/null; }
 case "$1" in
-  close) echo 4 > $B/bl_power ;;
+  close|closed) echo 4 > $B/bl_power ;;
   open)  echo 0 > /sys/class/graphics/fb0/blank; echo 0 > $B/bl_power ;;
   state) state ;;
   start) running || setsid "$0" watch >/dev/null 2>&1 </dev/null & ;;

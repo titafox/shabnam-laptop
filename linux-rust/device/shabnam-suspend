@@ -1,0 +1,328 @@
+#!/bin/sh
+# shabnam-suspend — sleep states for the Shabnam laptop (runs as root inside the Void tree).
+#   status                 : read-only facts (sleep states, held wake-up sources, power draw, last log lines)
+#   power                  : one line of input power, from the charger chip's own measurement
+#   dry-run [LEVEL]        : rehearsal through the kernel's pm_test: LEVEL = freezer | devices |
+#                            platform | processors | core (default freezer). Goes through the same
+#                            steps as a real sleep (so the screen goes dark for 10-20 s at every
+#                            level), stays "asleep" 5 s and comes back by itself.
+#   deep-idle on|off       : screen off, programs of the desktop user paused, CPU cores 1-3 off,
+#                            slowest CPU speed, Wi-Fi power saving. No kernel suspend involved.
+#   mem [SECONDS] [--lid]  : real suspend-to-RAM. SECONDS = wake up by the clock after that long
+#                            (default 20, the safety net for tests; 0 = sleep until lid/power key).
+#                            --lid : called by shabnam-lid; gives up if the lid was reopened meanwhile.
+#   boot-check             : at start-up: if the last sleep never finished waking, save what is known.
+# Every step is written to /var/log/shabnam/suspend.log. While a sleep is in progress the file
+# /var/log/shabnam/suspend.marker says how far it got; it is removed when waking has finished,
+# so finding it after a forced power-off shows where the machine got stuck.
+# Settings (all optional) in /etc/shabnam/suspend.conf, shown with their defaults:
+#   MEM_SLEEP=deep        deep (suspend-to-RAM through the firmware) or s2idle (lighter, kernel only)
+#   WIFI=keep             keep (stay joined, as Android did) or disconnect (leave before, rejoin after)
+#   DPMS=1                1: ask the desktop to switch the screen output off first and on afterwards
+#   DMC=0                 1: also let the memory clock drop during deep-idle (untested, may flicker)
+#   SUSPEND_IN_MAC=0      1: allow "mem" while the Mac second-screen mode owns the screen
+#   APP_USER=shabnam      whose programs are paused (the browser runs as this user)
+#   MIN_UPTIME=180        refuse "mem" this soon after start-up (see boot.sh: a forced power-off
+#                         in the first seconds makes the next start fall back to Android)
+LOGDIR=/var/log/shabnam
+LOG=$LOGDIR/suspend.log
+MARK=$LOGDIR/suspend.marker
+LOCK=/run/shabnam-suspend.lock
+IDLE=/run/shabnam-deepidle.state
+BL=/sys/class/backlight/backlight
+RTC=/sys/class/rtc/rtc0/wakealarm
+CPU=/sys/devices/system/cpu
+GPU=/sys/class/devfreq/fde60000.gpu
+DMCF=/sys/class/devfreq/dmc
+PCM=/proc/asound/card0/pcm0p/sub0/status
+CHG=/sys/kernel/debug/regmap/0-006b/registers
+GADGET=/sys/kernel/config/usb_gadget/g1
+
+MEM_SLEEP=deep WIFI=keep DPMS=1 DMC=0 SUSPEND_IN_MAC=0 APP_USER=shabnam MIN_UPTIME=180
+[ -r /etc/shabnam/suspend.conf ] && . /etc/shabnam/suspend.conf
+
+mkdir -p $LOGDIR && chmod 700 $LOGDIR
+[ -r /sys/kernel/debug/gpio ] || mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null
+
+log() {
+  line="$(date '+%F %T') up=$(cut -d' ' -f1 /proc/uptime) [$$] $*"
+  echo "$line" >> $LOG
+  echo "$line"
+}
+mark() { echo "stage=$1 at=$(date '+%F %T') epoch=$(date +%s) what=$WHAT" > $MARK; }
+mode() { cat /run/mode 2>/dev/null; }
+lid() {
+  case "$(grep hall_mh248 /sys/kernel/debug/gpio 2>/dev/null)" in
+    *" lo"*) echo closed ;; *" hi"*) echo open ;; *) echo unknown ;;
+  esac
+}
+# Wake-up sources that are being held right now (name and for how many ms).
+held() {
+  awk -F'\t+' 'NR>1 && $6+0!=0 { gsub(/ +$/, "", $1); printf "%s(%sms) ", $1, $6 }' /sys/kernel/debug/wakeup_sources 2>/dev/null
+}
+# Input power as the charger chip (bq25703) measures it: steps of 50 mA, about 0.6 W at 12 V.
+# The debugfs file shows 16-bit words at byte addresses; the wanted byte is the low one.
+power() {
+  [ -r $CHG ] || { echo "power: no charger readings"; return; }
+  set -- $(awk '$1=="27:"||$1=="29:"||$1=="2b:"||$1=="2c:" { print substr($2, 3, 2) }' $CHG)
+  [ $# -eq 4 ] || { echo "power: could not read the charger"; return; }
+  vbus=$(( $(printf %d 0x$1) * 64 + 3200 )); ichg=$(( $(printf %d 0x$2) * 64 ))
+  iin=$(( $(printf %d 0x$3) * 50 ));        vbat=$(( $(printf %d 0x$4) * 64 + 2880 ))
+  echo "power: in=$(( vbus * iin / 1000 ))mW (${vbus}mV x ${iin}mA) into-battery=$(( vbat * ichg / 1000 ))mW soc-temp=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)"
+}
+niri_msg() {
+  NIRI_SOCKET=$(ls -t /run/user0/niri.*.sock 2>/dev/null | head -1)
+  [ -n "$NIRI_SOCKET" ] && pidof niri-mali >/dev/null || return 1
+  NIRI_SOCKET=$NIRI_SOCKET timeout 5 niri-mali msg "$@" >/dev/null 2>&1
+}
+snapshot() {
+  log "$1: mode=$(mode) lid=$(lid) online=$(cat $CPU/online) gov=$(cat $CPU/cpufreq/policy0/scaling_governor) bl=$(cat $BL/brightness)/$(cat $BL/bl_power) udc=$(cat /sys/class/udc/*/state 2>/dev/null) usb0=$(cat /sys/class/net/usb0/carrier 2>/dev/null) wlan0=$(cat /sys/class/net/wlan0/operstate 2>/dev/null) pcm=$(head -1 $PCM 2>/dev/null)"
+  log "$1: held wake-up sources: $(held)"
+  log "$1: $(power)"
+  log "$1: suspend_stats $(head -2 /sys/kernel/debug/suspend_stats 2>/dev/null | tr -s '\n ' ' ')"
+}
+
+# ---- the pieces shared by deep-idle, dry-run and mem -------------------------------------------
+apps_pause() { pkill -STOP -u "$APP_USER" 2>/dev/null; log "programs of $APP_USER paused"; }
+apps_resume() { pkill -CONT -u "$APP_USER" 2>/dev/null; log "programs of $APP_USER resumed"; }
+# With its clients paused the sound server lets go of the codec after about 5 s.
+audio_quiet() {
+  [ "$(mode)" = mac ] && { log "audio: mac mode, left alone"; return; }
+  i=0
+  while [ $i -lt 16 ] && [ "$(head -1 $PCM 2>/dev/null)" != closed ]; do sleep 0.5; i=$((i+1)); done
+  log "audio: codec is $(head -1 $PCM 2>/dev/null) after $((i/2)) s"
+}
+audio_check() {
+  [ "$(mode)" = mac ] && return
+  if pidof pipewire >/dev/null; then log "audio: sound server running, codec $(head -1 $PCM 2>/dev/null)"
+  else log "audio: sound server gone, starting it"; shabnam-audio start >>$LOGDIR/audio.log 2>&1; fi
+}
+display_off() {
+  echo 4 > $BL/bl_power
+  if [ "$DPMS" = 1 ] && [ "$(mode)" != mac ]; then
+    niri_msg action power-off-monitors && log "display: output switched off by the desktop" || log "display: desktop did not switch the output off (backlight is off)"
+  else log "display: backlight off"; fi
+}
+display_on() {
+  [ "$(mode)" != mac ] && { niri_msg action power-on-monitors && log "display: output switched on by the desktop" || log "display: desktop did not answer power-on"; }
+  echo 0 > /sys/class/graphics/fb0/blank 2>/dev/null
+  echo 0 > $BL/bl_power
+  log "display: backlight on ($(cat $BL/brightness)), state: $(sed -n '1,2p;/Display mode/p' /sys/kernel/debug/dri/0/summary 2>/dev/null | tr -s '\n\t ' ' ')"
+}
+wifi_state() { timeout 3 wpa_cli -i wlan0 status 2>/dev/null | sed -n 's/^wpa_state=//p'; }
+wifi_wait() { i=0; while [ $i -lt "$1" ] && [ "$(wifi_state)" != COMPLETED ]; do sleep 1; i=$((i+1)); done; [ "$(wifi_state)" = COMPLETED ]; }
+wifi_before() {
+  WIFI_WAS=$(wifi_state)
+  [ "$WIFI" = disconnect ] && [ "$WIFI_WAS" = COMPLETED ] && { timeout 3 wpa_cli -i wlan0 disconnect >/dev/null 2>&1; log "wifi: left the network before sleeping"; }
+  log "wifi: before=$WIFI_WAS"
+}
+wifi_after() {
+  [ "$WIFI_WAS" = COMPLETED ] || { log "wifi: was not connected before ($WIFI_WAS), left alone"; return; }
+  [ "$WIFI" = disconnect ] && timeout 3 wpa_cli -i wlan0 reconnect >/dev/null 2>&1
+  if wifi_wait 15; then log "wifi: connected again by itself"
+  else
+    log "wifi: state=$(wifi_state), asking to rejoin"
+    timeout 3 wpa_cli -i wlan0 reassociate >/dev/null 2>&1
+    if wifi_wait 15; then log "wifi: rejoined"
+    else log "wifi: still $(wifi_state); restarting Wi-Fi (wifi-up)"; wifi-up >$LOGDIR/wifi-up.log 2>&1; log "wifi: wifi-up ended with $? ($(wifi_state))"; fi
+  fi
+  ip -4 addr show wlan0 2>/dev/null | grep -q 'inet ' || { log "wifi: no address, asking again"; dhcpcd -n wlan0 >/dev/null 2>&1; }
+}
+# The cable to the Mac: if it was working before and the network port has no link now,
+# reconnect the gadget the way boot.sh does.
+usb_before() { USB_WAS=$(cat /sys/class/udc/*/state 2>/dev/null); USB_NET_WAS=$(cat /sys/class/net/usb0/carrier 2>/dev/null); }
+usb_after() {
+  [ "$USB_WAS" = configured ] || { log "usb: no computer attached before ($USB_WAS), left alone"; return; }
+  i=0; while [ $i -lt 8 ] && [ "$(cat /sys/class/net/usb0/carrier 2>/dev/null)" != 1 ]; do sleep 1; i=$((i+1)); done
+  st=$(cat /sys/class/udc/*/state 2>/dev/null); car=$(cat /sys/class/net/usb0/carrier 2>/dev/null)
+  if [ "$st" = configured ] && { [ "$car" = 1 ] || [ "$USB_NET_WAS" != 1 ]; }; then log "usb: fine (udc=$st usb0=$car)"; return; fi
+  [ -d $GADGET ] || mount -t configfs configfs /sys/kernel/config 2>/dev/null
+  [ -d $GADGET ] || { log "usb: udc=$st usb0=$car and the gadget settings are not reachable; not reconnected"; return; }
+  U=$(cat $GADGET/UDC); [ -n "$U" ] || U=$(ls /sys/class/udc | head -1)
+  echo > $GADGET/UDC 2>/dev/null; sleep 2; echo "$U" > $GADGET/UDC 2>/dev/null
+  sleep 3
+  log "usb: was udc=$st usb0=$car; reconnected $U, now udc=$(cat /sys/class/udc/*/state 2>/dev/null) usb0=$(cat /sys/class/net/usb0/carrier 2>/dev/null)"
+}
+time_after() {
+  log "time: system $(date '+%F %T'), clock chip $(hwclock -r 2>/dev/null | cut -c1-19)"
+  shabnam-timesync status >/dev/null 2>&1 || { log "time: network time not running, restarting it"; shabnam-timesync stop; shabnam-timesync start >>$LOGDIR/timesync.log 2>&1; }
+}
+
+# ---- deep idle ---------------------------------------------------------------------------------
+deep_on() {
+  [ -e $IDLE ] && { echo "deep-idle already on"; return 0; }
+  snapshot "deep-idle on"
+  {
+    echo "GOV=$(cat $CPU/cpufreq/policy0/scaling_governor)"
+    echo "GPUMAX=$(cat $GPU/max_freq 2>/dev/null)"
+    echo "DMCGOV=$(cat $DMCF/governor 2>/dev/null)"
+    echo "WIFIPS=$(iw dev wlan0 get power_save 2>/dev/null | sed -n 's/^Power save: //p')"
+  } > $IDLE
+  display_off
+  apps_pause
+  for c in 3 2 1; do echo 0 > $CPU/cpu$c/online 2>/dev/null; done
+  echo powersave > $CPU/cpufreq/policy0/scaling_governor
+  [ -r $GPU/min_freq ] && cat $GPU/min_freq > $GPU/max_freq 2>/dev/null
+  [ "$DMC" = 1 ] && echo dmc_ondemand > $DMCF/governor 2>/dev/null
+  iw dev wlan0 set power_save on 2>/dev/null && r=on || r="not accepted by the driver"
+  log "deep-idle on: online=$(cat $CPU/online) gov=$(cat $CPU/cpufreq/policy0/scaling_governor) cpu=$(cat $CPU/cpufreq/policy0/scaling_cur_freq) gpu-max=$(cat $GPU/max_freq 2>/dev/null) dmc=$(cat $DMCF/governor 2>/dev/null) wifi-ps=$r"
+  (sleep 20; echo "$(date '+%F %T') up=$(cut -d' ' -f1 /proc/uptime) deep-idle after 20 s: $(power)" >> $LOG) &
+}
+# $1 = nodisplay: put everything back but leave the screen off (used before a real sleep).
+deep_off() {
+  [ -e $IDLE ] && . $IDLE
+  for c in 1 2 3; do echo 1 > $CPU/cpu$c/online 2>/dev/null; done
+  [ -n "$DMCGOV" ] && [ "$DMC" = 1 ] && echo "$DMCGOV" > $DMCF/governor 2>/dev/null
+  [ -n "$GOV" ] && echo "$GOV" > $CPU/cpufreq/policy0/scaling_governor
+  [ -n "$GPUMAX" ] && echo "$GPUMAX" > $GPU/max_freq 2>/dev/null
+  [ "$WIFIPS" = off ] && iw dev wlan0 set power_save off 2>/dev/null
+  apps_resume
+  [ "$1" = nodisplay ] || display_on
+  rm -f $IDLE
+  log "deep-idle off: online=$(cat $CPU/online) gov=$(cat $CPU/cpufreq/policy0/scaling_governor) $(power)"
+}
+
+# ---- kernel suspend (real, or rehearsed with pm_test) ------------------------------------------
+unlock() { rm -rf $LOCK; }
+lock() {
+  if ! mkdir $LOCK 2>/dev/null; then
+    old=$(cat $LOCK/pid 2>/dev/null)
+    [ -n "$old" ] && kill -0 "$old" 2>/dev/null && { echo "another shabnam-suspend ($old) is at work" >&2; exit 3; }
+    rm -rf $LOCK; mkdir $LOCK || exit 3
+  fi
+  echo $$ > $LOCK/pid
+}
+# Whatever happens, never leave the kernel in rehearsal mode or the programs paused.
+cleanup() {
+  [ "$(sed 's/.*\[\(.*\)\].*/\1/' /sys/power/pm_test 2>/dev/null)" = none ] || echo none > /sys/power/pm_test 2>/dev/null
+  [ -n "$PAUSED" ] && pkill -CONT -u "$APP_USER" 2>/dev/null
+  unlock
+}
+kernel_log() {
+  dmesg 2>/dev/null | tail -n 500 | grep -iE 'PM: |suspend|resum|wake|edp|vop2|sprdwl|sdiohal|dwc3|mali|rk808|rk817|error|fail|timeout' | tail -n 60 | sed 's/^/    kernel: /' >> $LOG
+}
+# $1 = mem | test   $2 = seconds until the clock wakes us (mem) or the pm_test level (test)   $3 = lid | ""
+go_sleep() {
+  kind=$1; arg=$2; from_lid=$3
+  [ "$(id -u)" = 0 ] || { echo "must be root" >&2; exit 1; }
+  grep -qw mem /sys/power/state || { echo "this kernel offers no suspend" >&2; exit 1; }
+  if [ "$(mode)" = mac ] && [ "$SUSPEND_IN_MAC" != 1 ]; then
+    log "$WHAT refused: mac mode owns the screen (set SUSPEND_IN_MAC=1 to allow)"; exit 4
+  fi
+  if [ $kind = mem ]; then
+    up=$(cut -d. -f1 /proc/uptime)
+    [ "$up" -ge "$MIN_UPTIME" ] || { log "$WHAT refused: only $up s since start-up (waits for $MIN_UPTIME)"; exit 4; }
+    grep -qw "$MEM_SLEEP" /sys/power/mem_sleep || { log "$WHAT refused: sleep kind '$MEM_SLEEP' not offered ($(cat /sys/power/mem_sleep))"; exit 4; }
+  else
+    grep -qw "$arg" /sys/power/pm_test 2>/dev/null || { echo "no pm_test level '$arg' here ($(cat /sys/power/pm_test 2>&1))" >&2; exit 4; }
+  fi
+  lock; trap cleanup EXIT; trap 'exit 130' INT TERM
+  [ -e $MARK ] && { log "note: a marker from an earlier sleep is still here: $(cat $MARK)"; mv $MARK $MARK.failed-$(date +%s); }
+  log "===== $WHAT begins ====="
+  mark preparing
+  [ -e $IDLE ] && deep_off nodisplay
+  snapshot before
+  usb_before; wifi_before
+  PAUSED=1; apps_pause
+  audio_quiet
+  display_off
+  if [ "$from_lid" = lid ] && [ "$(lid)" != closed ]; then
+    log "lid was opened again; not sleeping"
+    display_on; apps_resume; PAUSED=; rm -f $MARK; log "===== $WHAT given up ====="; return 0
+  fi
+  OLD_MEM_SLEEP=$(sed 's/.*\[\(.*\)\].*/\1/' /sys/power/mem_sleep)
+  if [ $kind = mem ]; then
+    echo 0 > $RTC 2>/dev/null
+    if [ "$arg" -gt 0 ]; then
+      echo "+$arg" > $RTC 2>/dev/null
+      alarm=$(cat $RTC 2>/dev/null)
+      if [ -z "$alarm" ]; then
+        log "could not set the wake-up clock; NOT sleeping without the safety net"
+        display_on; apps_resume; PAUSED=; rm -f $MARK; log "===== $WHAT given up ====="; return 5
+      fi
+      log "wake-up clock set: in $arg s (alarm=$alarm now=$(cat /sys/class/rtc/rtc0/since_epoch))"
+    else log "no wake-up clock: sleeping until lid, power key, keyboard or charger wakes the machine"; fi
+    [ "$OLD_MEM_SLEEP" = "$MEM_SLEEP" ] || echo "$MEM_SLEEP" > /sys/power/mem_sleep
+    echo none > /sys/power/pm_test 2>/dev/null
+  else
+    echo "$arg" > /sys/power/pm_test
+    log "rehearsal level: $(cat /sys/power/pm_test)"
+  fi
+  t0=$(date +%s)
+  mark "entering-kernel-suspend($([ $kind = mem ] && echo "$MEM_SLEEP" || echo "pm_test=$arg"))"
+  log "entering kernel suspend now"
+  sync
+  echo mem > /sys/power/state 2>$LOCK/err; rc=$?
+  # ---- awake again ----
+  t1=$(date +%s)
+  mark woke-in-kernel
+  log "back from kernel suspend: result=$rc $(cat $LOCK/err 2>/dev/null) asleep=$((t1-t0)) s wake-irq=$(cat /sys/power/pm_wakeup_irq 2>/dev/null || echo none)"
+  [ $kind = mem ] && { echo 0 > $RTC 2>/dev/null; [ "$OLD_MEM_SLEEP" = "$MEM_SLEEP" ] || echo "$OLD_MEM_SLEEP" > /sys/power/mem_sleep; }
+  echo none > /sys/power/pm_test 2>/dev/null
+  log "suspend_stats $(head -10 /sys/kernel/debug/suspend_stats 2>/dev/null | tr -s '\n ' ' ') last_failed_dev=$(sed -n '/last_failed_dev/{s/.*:[ \t]*//p;q}' /sys/kernel/debug/suspend_stats 2>/dev/null)"
+  kernel_log
+  mark restoring-display
+  if [ "$(lid)" = closed ]; then log "display: lid is closed, screen stays off"; else display_on; fi
+  mark restoring-programs
+  apps_resume; PAUSED=
+  mark restoring-network
+  wifi_after
+  usb_after
+  time_after
+  audio_check
+  snapshot after
+  rm -f $MARK
+  sync
+  log "===== $WHAT finished (kernel result $rc) ====="
+  return $rc
+}
+
+boot_check() {
+  rm -f $IDLE
+  [ -e $MARK ] || exit 0
+  ts=$(date +%s)
+  log "!!!!! the last sleep did not finish waking: $(cat $MARK)"
+  # After a restart caused by a kernel crash or the watchdog the old kernel messages survive here;
+  # after a forced power-off they are usually gone.
+  if [ -r /sys/fs/pstore/console-ramoops-0 ]; then
+    tail -c 60000 /sys/fs/pstore/console-ramoops-0 > $LOGDIR/suspend-crash-$ts.kmsg 2>/dev/null
+    log "kept the previous kernel messages in $LOGDIR/suspend-crash-$ts.kmsg"
+  else log "no kernel messages from before the restart were kept"; fi
+  mv $MARK $MARK.failed-$ts
+}
+
+status() {
+  echo "sleep states : $(cat /sys/power/state)   kinds: $(cat /sys/power/mem_sleep)   pm_test: $(cat /sys/power/pm_test 2>&1)"
+  echo "held sources : $(held)"
+  echo "suspend_stats: $(head -2 /sys/kernel/debug/suspend_stats 2>/dev/null | tr -s '\n ' ' ')"
+  echo "mode/lid     : $(mode) / $(lid)     deep-idle: $([ -e $IDLE ] && echo on || echo off)"
+  echo "cpu          : online $(cat $CPU/online), $(cat $CPU/cpufreq/policy0/scaling_governor), $(cat $CPU/cpufreq/policy0/scaling_cur_freq) kHz"
+  power
+  [ -e $MARK ] && echo "MARKER       : $(cat $MARK)"
+  ls $MARK.failed-* 2>/dev/null | sed 's/^/failed sleep : /'
+  echo "--- last lines of $LOG"; tail -n 12 $LOG 2>/dev/null
+}
+
+case "$1" in
+  status) status ;;
+  power) power ;;
+  deep-idle)
+    case "$2" in
+      on) deep_on ;;
+      off) deep_off ;;
+      *) echo "usage: shabnam-suspend deep-idle on|off" >&2; exit 2 ;;
+    esac ;;
+  dry-run)
+    level=${2:-freezer}
+    [ -e /sys/power/pm_test ] || { echo "this kernel has no pm_test" >&2; exit 1; }
+    WHAT="dry-run $level"; go_sleep test "$level" ;;
+  mem)
+    secs=20; from=
+    shift
+    for a in "$@"; do
+      case $a in --lid) from=lid ;; *[!0-9]*|'') echo "usage: shabnam-suspend mem [SECONDS] [--lid]" >&2; exit 2 ;; *) secs=$a ;; esac
+    done
+    WHAT="mem ($MEM_SLEEP, wake after ${secs}s${from:+, from lid})"; go_sleep mem "$secs" "$from" ;;
+  boot-check) boot_check ;;
+  *) echo "usage: shabnam-suspend status | power | dry-run [freezer|devices|platform|processors|core] | deep-idle on|off | mem [SECONDS] [--lid] | boot-check" >&2; exit 2 ;;
+esac

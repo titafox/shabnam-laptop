@@ -1,0 +1,41 @@
+diff --git a/apps/gridcraft/src/main.rs b/apps/gridcraft/src/main.rs
+index f05b421..3b07b4f 100644
+--- a/apps/gridcraft/src/main.rs
++++ b/apps/gridcraft/src/main.rs
+@@ -326,7 +326,7 @@ fn main() -> eframe::Result<()> {
+     }
+     let mut app = SheetApp::new(session, services());
+     app.watch_desktop_theme();
+-    app.start_update_check();
++    // Shabnam: no update check at start.
+     let control_port = control_port;
+     load_prefs(&mut app);
+     // Stamp the startup workbook's author from the persisted user name.
+diff --git a/crates/ui-egui/src/updates_ui.rs b/crates/ui-egui/src/updates_ui.rs
+index cded96c..8c4bbe5 100644
+--- a/crates/ui-egui/src/updates_ui.rs
++++ b/crates/ui-egui/src/updates_ui.rs
+@@ -34,11 +34,9 @@ pub(crate) fn start(app: &mut SheetApp, manual: bool) {
+ 
+ pub(crate) fn tick(app: &mut SheetApp, ctx: &egui::Context) {
+     let rt = &mut app.updates_rt;
+-    if std::mem::take(&mut rt.manual) {
+-        rt.updater.check_now(ctx);
+-    } else if rt.startup {
+-        rt.updater.check_at_start(ctx);
+-    }
++    // Shabnam: this build never asks GitHub for releases (neither at start nor from the Help
++    // menu), so the updater never learns of one and has nothing to download.
++    rt.manual = false;
+     rt.updater.tick(ctx);
+ }
+ 
+@@ -71,7 +69,7 @@ pub(crate) fn show(app: &mut SheetApp, ctx: &egui::Context) {
+     if result_window_shows(rt.updater.status(), rt.updater.prompt_open()) {
+         match craft_update::CheckResultDialog::new(&crate::UPDATE_APP, VERSION).show(ctx, rt.updater.status()) {
+             CheckResultResponse::Close => rt.updater.dismiss_status(),
+-            CheckResultResponse::CheckAgain => rt.updater.check_now(ctx),
++            CheckResultResponse::CheckAgain => {} // Shabnam: no checks
+             // The next `show_if` asks the window to close once nothing is unsaved.
+             CheckResultResponse::RestartToUpdate => rt.updater.restart_to_update(),
+             CheckResultResponse::None => {}

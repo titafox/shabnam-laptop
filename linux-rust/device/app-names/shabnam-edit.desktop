@@ -1,0 +1,18 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Text Editor
+Name[zh_CN]=文本编辑
+Name[ru]=Текстовый редактор
+GenericName=Text Editor
+GenericName[zh_CN]=文本编辑器
+GenericName[ru]=Текстовый редактор
+Comment=Edit text and Markdown files with the mouse (Ferrite)
+Comment[zh_CN]=用鼠标编辑文本和 Markdown 文件（Ferrite）
+Comment[ru]=Редактирование текста и Markdown мышью (Ferrite)
+Exec=shabnam-edit %F
+Icon=/usr/local/share/shabnam-apps/ferrite.png
+Terminal=false
+StartupWMClass=ferrite
+Categories=Utility;TextEditor;
+MimeType=text/plain;text/markdown;text/x-log;text/csv;application/json;application/x-yaml;application/toml;text/x-toml;

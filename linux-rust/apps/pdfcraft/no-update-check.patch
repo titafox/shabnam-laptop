@@ -1,0 +1,32 @@
+diff --git a/apps/pdfcraft/src/main.rs b/apps/pdfcraft/src/main.rs
+index 797e14e..2c45d62 100644
+--- a/apps/pdfcraft/src/main.rs
++++ b/apps/pdfcraft/src/main.rs
+@@ -473,7 +473,7 @@ fn app_creator<'a>(
+             }
+             app.motion.source = Some(motion::source());
+         }
+-        app.set_startup_update_check(true);
++        app.set_startup_update_check(false); // Shabnam: no update check at start
+         app.printer_source = Some(pdfcraft_ui_egui::system_printers());
+         app.two_sided_source = Some(pdfcraft_ui_egui::system_two_sided());
+         app.os_key_store_ids = cfg!(any(target_os = "macos", target_os = "windows"));
+diff --git a/crates/ui-egui/src/platform/updates.rs b/crates/ui-egui/src/platform/updates.rs
+index df58adb..0460e9a 100644
+--- a/crates/ui-egui/src/platform/updates.rs
++++ b/crates/ui-egui/src/platform/updates.rs
+@@ -143,11 +143,9 @@ impl PdfCraftApp {
+             // Settled on the first frame: a preference turned on later waits for the next start.
+             let at_start = std::mem::take(&mut self.updates.startup_check) && self.update_check_at_start;
+             let updates = &mut self.updates;
+-            if std::mem::take(&mut updates.check_requested) {
+-                updates.updater.check_now(&ctx);
+-            } else if at_start {
+-                updates.updater.check_at_start(&ctx);
+-            }
++            // Shabnam: this build never asks GitHub for releases (neither at start nor from the
++            // Help menu), so the updater never learns of one and has nothing to download.
++            let _ = (std::mem::take(&mut updates.check_requested), at_start);
+             updates.updater.tick(&ctx);
+         }
+     }

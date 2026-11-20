@@ -1,0 +1,18 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Word Processor
+Name[zh_CN]=文字处理
+Name[ru]=Документы
+GenericName=Word Processor
+GenericName[zh_CN]=文字处理
+GenericName[ru]=Текстовый процессор
+Comment=Write and edit documents, .docx (WordCraft)
+Comment[zh_CN]=撰写和编辑文档，支持 .docx（WordCraft）
+Comment[ru]=Создание и редактирование документов .docx (WordCraft)
+Exec=shabnam-writer %F
+Icon=/usr/local/share/shabnam-apps/wordcraft.png
+Terminal=false
+StartupWMClass=ai.storyteller.wordcraft
+Categories=Office;WordProcessor;
+MimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/msword;application/rtf;application/vnd.oasis.opendocument.text;

@@ -3,7 +3,7 @@
 # ~/.config/mimeapps.list wins over this file. Every application named here also lists the type
 # in its .desktop file's MimeType line (linux-rust/device/app-names/).
 #
-# Pictures and PDF go to the browser because no viewer is installed. The browser runs as the user
+# Pictures go to the browser because no viewer is installed; PDF, text, spreadsheets and documents have their own programs. The browser runs as the user
 # "shabnam": it shows files under /home/shabnam (its downloads) but cannot read anything under /root.
 [Default Applications]
 inode/directory=shabnam-files.desktop
@@ -22,19 +22,18 @@ video/x-m4v=shabnam-player.desktop
 application/vnd.apple.mpegurl=shabnam-player.desktop
 application/x-mpegURL=shabnam-player.desktop
 application/dash+xml=shabnam-player.desktop
-text/plain=shabnam-textedit-open.desktop
-text/markdown=shabnam-textedit-open.desktop
-text/x-log=shabnam-textedit-open.desktop
-text/x-csrc=shabnam-textedit-open.desktop
-text/x-chdr=shabnam-textedit-open.desktop
-text/x-c++src=shabnam-textedit-open.desktop
-text/x-python=shabnam-textedit-open.desktop
-text/x-shellscript=shabnam-textedit-open.desktop
-text/rust=shabnam-textedit-open.desktop
-text/x-toml=shabnam-textedit-open.desktop
-text/css=shabnam-textedit-open.desktop
-text/csv=shabnam-textedit-open.desktop
-text/xml=shabnam-textedit-open.desktop
+text/plain=shabnam-edit.desktop
+text/markdown=shabnam-edit.desktop
+text/x-log=shabnam-edit.desktop
+text/x-csrc=shabnam-edit.desktop
+text/x-chdr=shabnam-edit.desktop
+text/x-c++src=shabnam-edit.desktop
+text/x-python=shabnam-edit.desktop
+text/x-shellscript=shabnam-edit.desktop
+text/rust=shabnam-edit.desktop
+text/x-toml=shabnam-edit.desktop
+text/css=shabnam-edit.desktop
+text/xml=shabnam-edit.desktop
 application/json=shabnam-textedit-open.desktop
 application/x-yaml=shabnam-textedit-open.desktop
 application/toml=shabnam-textedit-open.desktop
@@ -45,7 +44,6 @@ text/html=shabnam-browser.desktop
 application/xhtml+xml=shabnam-browser.desktop
 x-scheme-handler/http=shabnam-browser.desktop
 x-scheme-handler/https=shabnam-browser.desktop
-application/pdf=shabnam-browser.desktop
 image/png=shabnam-browser.desktop
 image/jpeg=shabnam-browser.desktop
 image/gif=shabnam-browser.desktop
@@ -53,3 +51,9 @@ image/webp=shabnam-browser.desktop
 image/svg+xml=shabnam-browser.desktop
 image/bmp=shabnam-browser.desktop
 image/avif=shabnam-browser.desktop
+application/pdf=shabnam-pdf.desktop
+application/vnd.openxmlformats-officedocument.spreadsheetml.sheet=shabnam-sheet.desktop
+application/vnd.ms-excel=shabnam-sheet.desktop
+text/csv=shabnam-sheet.desktop
+application/vnd.openxmlformats-officedocument.wordprocessingml.document=shabnam-writer.desktop
+application/msword=shabnam-writer.desktop

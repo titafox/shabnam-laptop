@@ -1,0 +1,42 @@
+diff --git a/crates/ui-egui/src/platform/system_fonts.rs b/crates/ui-egui/src/platform/system_fonts.rs
+index 570e5de..648fcbc 100644
+--- a/crates/ui-egui/src/platform/system_fonts.rs
++++ b/crates/ui-egui/src/platform/system_fonts.rs
+@@ -342,6 +342,8 @@ fn han_candidates(traditional: bool) -> Vec<PathBuf> {
+         macos_han_candidates(traditional)
+     } else {
+         unix_fonts(&[
++            // Shabnam: the laptop's Chinese face is Noto Sans CJK (Void's noto-fonts-cjk); see `noto_cjk_face`.
++            "noto/NotoSansCJK-Regular.ttc",
+             "truetype/wqy/wqy-microhei.ttc",
+             "wenquanyi/wqy-microhei/wqy-microhei.ttc",
+             "wqy-microhei/wqy-microhei.ttc",
+@@ -445,13 +447,27 @@ fn read(path: &Path, probe: char, max: u64) -> Option<Arc<FontData>> {
+         return None;
+     }
+     let bytes = std::fs::read(path).ok()?;
+-    let index = face_with(&bytes, probe)?;
++    let index = noto_cjk_face(path, &bytes, probe).or_else(|| face_with(&bytes, probe))?;
+     let mut data = FontData::from_owned(bytes);
+     data.index = index;
+     log::info!("interface font fallback: {} (face {index})", path.display());
+     Some(Arc::new(crate::theme::on_interface_baseline(data)))
+ }
+ 
++/// Shabnam: every face of the Noto Sans CJK collection maps every Han character, so the first one
++/// with the probe would be the Japanese face (0). Its faces are JP, KR, SC, TC, HK: take SC (2)
++/// for Simplified and TC (3) for Traditional Chinese interface text.
++fn noto_cjk_face(path: &Path, bytes: &[u8], probe: char) -> Option<u32> {
++    use skrifa::MetadataProvider as _;
++    let index = match probe {
++        HANS_PROBE => 2,
++        HANT_PROBE => 3,
++        _ => return None,
++    };
++    let noto = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("NotoSansCJK"));
++    (noto && skrifa::FontRef::from_index(bytes, index).is_ok_and(|font| font.charmap().map(probe).is_some())).then_some(index)
++}
++
+ /// The first face of the file that parses and maps `c`. egui parses fonts with the same skrifa,
+ /// so a face accepted here is one it can load.
+ fn face_with(bytes: &[u8], c: char) -> Option<u32> {

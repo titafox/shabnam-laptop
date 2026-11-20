@@ -1,0 +1,18 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Spreadsheet
+Name[zh_CN]=表格
+Name[ru]=Таблицы
+GenericName=Spreadsheet
+GenericName[zh_CN]=电子表格
+GenericName[ru]=Электронные таблицы
+Comment=Open and edit spreadsheets (GridCraft)
+Comment[zh_CN]=打开和编辑电子表格（GridCraft）
+Comment[ru]=Просмотр и редактирование электронных таблиц (GridCraft)
+Exec=shabnam-sheet %F
+Icon=/usr/local/share/shabnam-apps/gridcraft.png
+Terminal=false
+StartupWMClass=ai.storyteller.gridcraft
+Categories=Office;Spreadsheet;
+MimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel;text/csv;text/tab-separated-values;

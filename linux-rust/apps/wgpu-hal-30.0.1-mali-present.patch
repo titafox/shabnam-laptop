@@ -1,0 +1,38 @@
+--- a/src/gles/egl.rs	2026-11-20 07:32:55
++++ b/src/gles/egl.rs	2026-11-20 07:32:55
+@@ -145,12 +145,10 @@
+                     log::info!("EGL says it can present to the window but not natively",);
+                 }
+                 // Android emulator can't natively present either.
+-                let tier_threshold =
+-                    if cfg!(target_os = "android") || cfg!(windows) || cfg!(target_env = "ohos") {
+-                        1
+-                    } else {
+-                        2
+-                    };
++                // Shabnam: the vendor Mali driver (libmali, Wayland) offers window configs only
++                // without EGL_NATIVE_RENDERABLE, like Android's drivers; with the threshold of 2
++                // wgpu then calls the surface unpresentable and finds no adapter at all.
++                let tier_threshold = 1;
+                 return Ok((config, tier_max >= tier_threshold));
+             }
+             Ok(None) => {
+@@ -842,6 +840,18 @@
+                 }
+                 .map_err(instance_err("failed to get XCB display"))?;
+                 (display, WindowKind::X11)
++            }
++            // Shabnam: the vendor Mali driver is EGL 1.4 (no eglGetPlatformDisplay). Its
++            // eglGetDisplay accepts a wl_display, and eglCreateWindowSurface a wl_egl_window.
++            (Some(Rdh::Wayland(wayland_display_handle)), None) => {
++                log::debug!("Using Wayland through EGL 1.4 eglGetDisplay");
++                let display = unsafe {
++                    egl.get_display(wayland_display_handle.display.as_ptr().cast())
++                }
++                .ok_or_else(|| {
++                    crate::InstanceError::new("Failed to get the Wayland display".into())
++                })?;
++                (display, WindowKind::Wayland)
+             }
+             x if client_ext_str.contains("EGL_MESA_platform_surfaceless") => {
+                 log::debug!(

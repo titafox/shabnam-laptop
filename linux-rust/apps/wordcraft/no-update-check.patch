@@ -1,0 +1,41 @@
+diff --git a/apps/wordcraft/src/main.rs b/apps/wordcraft/src/main.rs
+index e353991..85a80fa 100644
+--- a/apps/wordcraft/src/main.rs
++++ b/apps/wordcraft/src/main.rs
+@@ -614,7 +614,7 @@ fn main() -> eframe::Result {
+             let mut session = Session::new(doc);
+             session.system_region = region;
+             let mut app = WordApp::new(session, services(file_dialog, &cc.egui_ctx));
+-            app.set_startup_update_check(true);
++            app.set_startup_update_check(false); // Shabnam: no update check at start
+             load_prefs(&mut app);
+             // After the preferences, so the reason it gives is in the interface language.
+             if updates_unsafe {
+diff --git a/crates/ui-egui/src/updates_ui.rs b/crates/ui-egui/src/updates_ui.rs
+index 9aceeff..cd48495 100644
+--- a/crates/ui-egui/src/updates_ui.rs
++++ b/crates/ui-egui/src/updates_ui.rs
+@@ -108,11 +108,9 @@ pub(crate) fn tick(app: &mut WordApp, ctx: &egui::Context) {
+     {
+         let rt = &mut app.updates_rt;
+         rt.repaint = Some(ctx.clone());
+-        if std::mem::take(&mut rt.check_requested) {
+-            rt.updater.check_now(ctx);
+-        } else if rt.startup_check {
+-            rt.updater.check_at_start(ctx);
+-        }
++        // Shabnam: this build never asks GitHub for releases (neither at start nor from the Help
++        // menu), so the updater never learns of one and has nothing to download.
++        rt.check_requested = false;
+         rt.updater.tick(ctx);
+     }
+     #[cfg(target_arch = "wasm32")]
+@@ -146,7 +144,7 @@ pub(crate) fn show(app: &mut WordApp, ctx: &egui::Context) {
+                     rt.manual_window_open = false;
+                     rt.updater.dismiss_status();
+                 }
+-                CheckResultResponse::CheckAgain => rt.updater.check_now(ctx),
++                CheckResultResponse::CheckAgain => {} // Shabnam: no checks
+                 // The window closes, and the next frame's `show_if` asks the app to quit once the
+                 // shown document has no unsaved work.
+                 CheckResultResponse::RestartToUpdate => {

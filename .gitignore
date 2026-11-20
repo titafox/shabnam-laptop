@@ -2,7 +2,7 @@
 firmware-backup-*/
 gsi/
 stock-apps-backup-*/
-apps/
+/apps/
 lan-helper/dist/
 *.img
 *.img.gz

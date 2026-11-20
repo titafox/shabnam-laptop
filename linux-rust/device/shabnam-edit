@@ -1,0 +1,6 @@
+#!/bin/sh
+# shabnam-edit [FILE ...] — the graphical text / Markdown editor: Ferrite
+# (linux-rust/apps/ferrite/build.sh), run as the unprivileged user through shabnam-userapp.
+# It draws with OpenGL ES (egui's glow renderer) and has its own title bar with a close button.
+# The interface language follows LANG (Chinese, Russian and English are built in).
+exec shabnam-userapp /usr/local/lib/ferrite/ferrite "$@"

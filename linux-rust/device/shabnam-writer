@@ -1,0 +1,9 @@
+#!/bin/sh
+# shabnam-writer [FILE.docx ...] — the word processor: WordCraft (linux-rust/apps/wordcraft/build.sh),
+# run as the unprivileged user through shabnam-userapp.
+#   WGPU_BACKEND=gl  WordCraft draws with wgpu; its OpenGL backend (GLES through EGL) is the only one
+#                    this GPU driver can serve (no Vulkan).
+# The interface language follows LANG (Chinese, Russian, English are built in). It never looks for
+# updates (apps/wordcraft/no-update-check.patch).
+SHABNAM_APP_ENV="WGPU_BACKEND=gl $SHABNAM_APP_ENV" \
+  exec shabnam-userapp /usr/local/lib/wordcraft/wordcraft "$@"

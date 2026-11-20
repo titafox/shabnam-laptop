@@ -1,0 +1,10 @@
+#!/bin/sh
+# shabnam-pdf [FILE.pdf ...] — the PDF reader: PdfCraft (linux-rust/apps/pdfcraft/build.sh), run as the
+# unprivileged user through shabnam-userapp.
+#   PDFCRAFT_RENDERER=gl   draw with OpenGL ES (egui's glow renderer); the other renderer, wgpu, is not
+#                          tried first: this GPU driver has no Vulkan.
+#   PDFCRAFT_TITLEBAR=app  the program draws its own title bar with a close button.
+# The interface language follows LANG (Chinese, Russian, English are all built in).
+# This build never looks for updates (apps/pdfcraft/no-update-check.patch).
+SHABNAM_APP_ENV="PDFCRAFT_RENDERER=gl PDFCRAFT_TITLEBAR=app $SHABNAM_APP_ENV" \
+  exec shabnam-userapp /usr/local/lib/pdfcraft/pdfcraft "$@"

@@ -1,0 +1,53 @@
+#!/bin/sh
+# shabnam-userapp PROGRAM [FILE...] — starts a third-party desktop program as the unprivileged user.
+#
+# The desktop runs as root; programs we did not write (the PDF reader, the text editor, the
+# spreadsheet … built by linux-rust/apps/*/build.sh) must not. Like shabnam-browser and shabnam-player,
+# this script lets the user "shabnam" (uid 700) reach the compositor's Wayland socket — nothing
+# else, not even sound — and drops to that user with HOME=/home/shabnam. The program opens files with
+# that user's rights: what lies under /home/shabnam or is readable by everyone, nothing under /root.
+#
+# The interface language follows the session: LANG / LC_ALL / LC_MESSAGES are passed through
+# (zh_CN.UTF-8, ru_RU.UTF-8 or en_US.UTF-8; zh_CN.UTF-8 when the session sets none).
+# Variables named in SHABNAM_APP_ENV ("NAME=value NAME=value", no spaces inside a value) are set for the program.
+umask 022
+APP_USER=shabnam
+MALI_LIBS=/opt/mali/mali:/opt/mali      # the GPU driver (GLES through EGL); the programs load it themselves
+
+prog=$1; [ -n "$prog" ] || { echo "usage: shabnam-userapp PROGRAM [FILE...]" >&2; exit 2; }
+shift
+socket=${WAYLAND_DISPLAY:-wayland-1}
+case $socket in /*) ;; *) socket=${XDG_RUNTIME_DIR:-/run/user0}/$socket ;; esac
+
+if [ "$(id -u)" = 0 ]; then
+  uid=$(id -u "$APP_USER") || { echo "shabnam-userapp: user $APP_USER is missing" >&2; exit 1; }
+  # The same hard link shabnam-browser makes; see there for why it is safe.
+  share=/run/shabnam-share
+  mkdir -p "$share" && chown root:"$APP_USER" "$share" && chmod 750 "$share" &&
+    chgrp "$APP_USER" "$socket" && chmod 660 "$socket" && ln -f "$socket" "$share/wayland-0" ||
+    { echo "shabnam-userapp: cannot share $socket with $APP_USER" >&2; exit 1; }
+  socket=$share/wayland-0
+  runtime=/run/user/$uid
+  mkdir -p "$runtime" && chown "$APP_USER:$APP_USER" "$runtime" && chmod 700 "$runtime"
+  home=$(getent passwd "$APP_USER" | cut -d: -f6)
+  # File names are made absolute here, before the working directory changes.
+  n=$#
+  while [ "$n" -gt 0 ]; do
+    a=$1; shift; n=$((n-1))
+    case $a in -*|*://*) ;; /*) ;; *) a=$PWD/$a ;; esac
+    set -- "$@" "$a"
+  done
+  cd "$home" || exit 1
+  # shellcheck disable=SC2086
+  exec setpriv --reuid "$APP_USER" --regid "$APP_USER" --init-groups \
+    env -i HOME="$home" USER="$APP_USER" LOGNAME="$APP_USER" SHELL=/bin/sh \
+      PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-zh_CN.UTF-8}" \
+      ${LC_ALL:+LC_ALL="$LC_ALL"} ${LC_MESSAGES:+LC_MESSAGES="$LC_MESSAGES"} ${TZ:+TZ="$TZ"} \
+      XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY="$socket" \
+      LD_LIBRARY_PATH="$MALI_LIBS" \
+      $SHABNAM_APP_ENV \
+      "$prog" "$@"
+fi
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MALI_LIBS}"
+# shellcheck disable=SC2086
+exec env $SHABNAM_APP_ENV "$prog" "$@"

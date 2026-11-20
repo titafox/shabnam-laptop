@@ -1,0 +1,19 @@
+diff --git a/src/config/persistence.rs b/src/config/persistence.rs
+index eab275f..31c172f 100644
+--- a/src/config/persistence.rs
++++ b/src/config/persistence.rs
+@@ -172,8 +172,12 @@ fn ensure_config_dir() -> Result<PathBuf> {
+ /// println!("Theme: {:?}", settings.theme);
+ /// ```
+ pub fn load_config() -> Settings {
+-    load_config_internal()
+-        .unwrap_or_warn_default(Settings::default(), "Failed to load configuration")
++    let mut settings = load_config_internal()
++        .unwrap_or_warn_default(Settings::default(), "Failed to load configuration");
++    // Shabnam: the interface language follows the session's locale (LC_ALL / LC_MESSAGES / LANG)
++    // at every start, not only at the first one; the system has one language switch.
++    settings.language = crate::config::settings::Language::from_system_locale();
++    settings
+ }
+ 
+ /// Internal implementation of config loading.

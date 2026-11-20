@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=TextEdit
-Name[zh_CN]=文本编辑
-Name[ru]=Текстовый редактор
+Name=TextEdit (terminal)
+Name[zh_CN]=文本编辑（终端）
+Name[ru]=Текстовый редактор (терминал)
 Comment=Helix text editor
 Exec=hx %F
 Icon=/usr/share/shabnam/icons/textedit.png

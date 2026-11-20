@@ -1,0 +1,13 @@
+diff --git a/crates/fonts/src/ui_fallback.rs b/crates/fonts/src/ui_fallback.rs
+index fafe645..ec64e3a 100644
+--- a/crates/fonts/src/ui_fallback.rs
++++ b/crates/fonts/src/ui_fallback.rs
+@@ -131,6 +131,8 @@ fn candidates(hans: bool, korean: bool) -> Vec<&'static str> {
+     } else {
+         (
+             &[
++                // Shabnam: where Void Linux's noto-fonts-cjk puts the collection.
++                "noto/NotoSansCJK-Regular.ttc",
+                 "noto-cjk/NotoSansCJK-Regular.ttc",
+                 "opentype/noto/NotoSansCJK-Regular.ttc",
+                 "google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc",

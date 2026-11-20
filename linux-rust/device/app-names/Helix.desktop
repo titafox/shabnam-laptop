@@ -2,6 +2,7 @@
 Type=Application
 Name=TextEdit
 Name[zh_CN]=文本编辑
+Name[ru]=Текстовый редактор
 Comment=Helix text editor
 Exec=hx %F
 Icon=/usr/share/shabnam/icons/textedit.png

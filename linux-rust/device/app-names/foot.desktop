@@ -2,6 +2,7 @@
 Type=Application
 Name=Terminal
 Name[zh_CN]=终端
+Name[ru]=Терминал
 Exec=foot
 Icon=/usr/share/shabnam/icons/terminal.png
 Terminal=false

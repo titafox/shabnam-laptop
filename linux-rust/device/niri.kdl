@@ -9,6 +9,14 @@ spawn-at-startup "shabnam-ime"
 output "eDP-1" { scale 1.5; }
 // Touchpad: tap to click, two-finger tap or two-finger press = right click, three-finger tap = middle.
 input {
+    // Latin and Russian layouts; Alt+Shift switches. Chinese is typed through the input method
+    // (Ctrl+Space) on top of the Latin layout.
+    keyboard {
+        xkb {
+            layout "us,ru"
+            options "grp:alt_shift_toggle"
+        }
+    }
     touchpad {
         tap
         click-method "clickfinger"

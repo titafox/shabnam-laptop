@@ -5,7 +5,13 @@
 export LD_LIBRARY_PATH=/opt/mali/mali:/opt/mali:/opt/mpp2/usr/lib/aarch64-linux-gnu
 export LIBSEAT_BACKEND=noop RUST_BACKTRACE=1
 export XDG_RUNTIME_DIR=/run/user0 HOME=/root PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin
-export LANG=zh_CN.UTF-8
+# The system language: one word in /etc/shabnam/locale (zh, ru or en), written by the language
+# switch in quick settings. Everything started from here inherits it. Chinese if nothing is set.
+case "$(cat /etc/shabnam/locale 2>/dev/null)" in
+  ru) export LANG=ru_RU.UTF-8 ;;
+  en) export LANG=en_US.UTF-8 ;;
+  *)  export LANG=zh_CN.UTF-8 ;;
+esac
 # Everything the session creates (sockets above all) is for root only unless opened on purpose:
 # the browser runs as the unprivileged user "shabnam" and can look into /run/user0.
 umask 022

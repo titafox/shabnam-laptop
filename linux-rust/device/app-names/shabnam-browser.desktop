@@ -3,10 +3,13 @@ Version=1.0
 Type=Application
 Name=Browser
 Name[zh_CN]=浏览器
+Name[ru]=Браузер
 GenericName=Web Browser
 GenericName[zh_CN]=网页浏览器
+GenericName[ru]=Веб-браузер
 Comment=Browse the web
 Comment[zh_CN]=访问互联网
+Comment[ru]=Просмотр веб-страниц
 Exec=shabnam-browser %U
 Icon=chromium
 Terminal=false
@@ -19,9 +22,11 @@ Actions=new-window;new-private-window;
 [Desktop Action new-window]
 Name=New Window
 Name[zh_CN]=新建窗口
+Name[ru]=Новое окно
 Exec=shabnam-browser
 
 [Desktop Action new-private-window]
 Name=New Incognito Window
 Name[zh_CN]=新建隐身窗口
+Name[ru]=Новое окно в режиме инкогнито
 Exec=shabnam-browser --incognito

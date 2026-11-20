@@ -3,6 +3,7 @@ Version=1.0
 Type=Application
 Name=TextEdit (open file)
 Name[zh_CN]=文本编辑（打开文件）
+Name[ru]=Текстовый редактор (открыть файл)
 Comment=Opens a text file in Helix inside a terminal window; used by file associations, not shown in the launcher
 Exec=foot --app-id=Helix hx %F
 Icon=/usr/share/shabnam/icons/textedit.png

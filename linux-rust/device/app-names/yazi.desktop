@@ -2,6 +2,7 @@
 Type=Application
 Name=Files (terminal)
 Name[zh_CN]=文件（终端）
+Name[ru]=Файлы (терминал)
 Comment=File manager
 Exec=yazi %u
 Icon=/usr/share/shabnam/icons/files.png

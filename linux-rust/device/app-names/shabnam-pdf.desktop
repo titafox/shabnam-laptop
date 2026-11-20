@@ -1,0 +1,18 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PDF Reader
+Name[zh_CN]=PDF 阅读器
+Name[ru]=Просмотр PDF
+GenericName=PDF Viewer
+GenericName[zh_CN]=PDF 阅读器
+GenericName[ru]=Просмотр документов PDF
+Comment=Read, annotate and fill in PDF documents (PdfCraft)
+Comment[zh_CN]=阅读、批注和填写 PDF 文档（PdfCraft）
+Comment[ru]=Чтение, пометки и заполнение документов PDF (PdfCraft)
+Exec=shabnam-pdf %F
+Icon=/usr/local/share/shabnam-apps/pdfcraft.png
+Terminal=false
+StartupWMClass=ai.storyteller.pdfcraft
+Categories=Office;Viewer;
+MimeType=application/pdf;

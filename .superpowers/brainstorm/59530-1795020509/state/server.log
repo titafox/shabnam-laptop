@@ -1,6 +1,0 @@
-{"type":"server-started","port":59793,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:59793/?key=85d9224dead960887f1008f57472a2883e7aa0a434897866eafd444e100adc83","screen_dir":"/Users/mumu/Projects/loptop/.superpowers/brainstorm/59530-1795020509/content","state_dir":"/Users/mumu/Projects/loptop/.superpowers/brainstorm/59530-1795020509/state","idle_timeout_ms":14400000}
-{"type":"screen-added","file":"/Users/mumu/Projects/loptop/.superpowers/brainstorm/59530-1795020509/content/layout.html"}
-{"type":"screen-added","file":"/Users/mumu/Projects/loptop/.superpowers/brainstorm/59530-1795020509/content/chromeos-style.html"}
-{"type":"screen-added","file":"/Users/mumu/Projects/loptop/.superpowers/brainstorm/59530-1795020509/content/waiting.html"}
-{"type":"screen-added","file":"/Users/mumu/Projects/loptop/.superpowers/brainstorm/59530-1795020509/content/design-v1.html"}
-{"type":"server-stopped","reason":"idle timeout"}

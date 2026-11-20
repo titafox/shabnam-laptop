@@ -67,12 +67,79 @@ Mac 端的设置窗口：
 
 安全措施：存在 `/data/void-boot/disabled` 时回到安卓；上一次启动没有成功的话，下一次自动回到安卓。
 
+## 从锁死到 root
+
+适用于这一款机器：Android 11 `userdebug` 构建，`ro.adb.secure` 为空，SELinux 为 Permissive
+（同族机器先按第 2 步的条件核对）。全程不拆机、不刷机，人只需要操作机器约 5 分钟，没有用到
+任何内核漏洞，其余都在 Mac 终端里做。「锁死」的问题到这里就彻底解决了——后面的桌面、副屏都是
+root 之下的普通操作。
+
+### 第 1 步：手动三步（全程唯一必须人操作的）
+
+1. 按 **`Win+N`** 下拉状态栏 → **用户 → 更多设置**：这是安卓原生设置（出厂的「设置」被
+   `com.shcmcc.setting` 劫持，从这里进可以绕开）。
+2. 原生设置 → **关于** → 连点 **7 次版本号**，唤出开发者选项，打开 **USB ADB**（此时 USB 设备
+   模式被固件禁着，口不通，先开着即可，真正用上的是网络 adb）。
+3. 原生设置 → **更多应用** → **闪电（Lightning）浏览器** → 打开
+   `http://10.158.25.5:8000/open-desktop.apk` 安装「开放桌面」（[`open-desktop.apk`](open-desktop.apk)），
+   设为默认桌面。
+
+Mac 侧的安装通道（开放桌面靠它下发命令）：
+
+```sh
+sudo ifconfig en0 alias 10.158.25.5    # Mac 地址固定（设备侧写死了）
+cd lan-helper                          # 把 open-desktop.apk 放到它的 dist/ 下
+python3 server.py &                    # 8000 端口
+```
+
+闪电浏览器自己不能执行任何命令，它只是「能装 APK」；开端口要靠装进来的 app（本教程用开放桌面，
+换成 Shizuku、KeepADB 等任意能跑 shell 的 app 也行，原理相同：用 app 权限 `setprop`）。
+
+### 第 2 步：app 开端口 → adb root（核心突破）
+
+动手前先核对四个前提（不满足就没有这条最短路径），此时 5555 还没开，走开放桌面的 `probe` 通道
+（Mac 端 `ctl.py probe '<命令>'`）：
+
+```sh
+getprop ro.build.type     # userdebug
+getprop ro.adb.secure     # 必须为空
+getprop ro.debuggable     # 1
+getenforce                # Permissive
+```
+
+再用开放桌面下发一条命令打开网络 adb 端口：
+
+```sh
+setprop service.adb.tcp.port 5555; setprop ctl.restart adbd
+```
+
+然后在 Mac 上：
+
+```sh
+adb connect 10.158.25.29:5555   # 出厂 IP；换网 / 换机以实际 IP 为准
+adb root                         # 直接 uid=0（u:r:su:s0）
+adb shell id                     # 验证：uid=0(root)
+```
+
+**root 到手。** 零内核漏洞，没有 Magisk，没有刷任何东西。
+
+### 第 3 步：固化，让重启不掉
+
+```sh
+# 网络 adb 跨重启（触发器本来就在 /vendor/etc/init/hw/init.rk30board.rc）
+adb shell setprop persist.internet_adb_enable 1
+
+# 开机把 5555 清零的是 MDM，卸掉它
+adb shell pm uninstall -k --user 0 com.centerm.androidmanager
+
+adb reboot   # 重启后 adb connect 仍秒连、adb root 仍 uid=0 → 完成
+```
+
+到此：任意一台同配置机器，人工 5 分钟 + 终端几分钟 = 稳定 root + 网络 adb，不会掉（仅恢复出厂会清空）。
+
 ## 安装到一台新机器
 
-下面从「`adb` 已经能连上这台机器、`adb root` 能拿到 `uid=0`」讲起。怎么从锁死状态开出网络
-adb、拿到 root（人工约 5 分钟，零内核漏洞，不刷机），见
-[《EC-NB01-最短路径教程.md》](EC-NB01-最短路径教程.md) 第一部分；其中第 1 步需要先装上
-「开放桌面」APK（[`open-desktop.apk`](open-desktop.apk)）来打开 adb 端口。
+拿到 root 之后（上一节），从「`adb` 已经能连上、`adb root` 能拿到 `uid=0`」继续。
 
 安装需要的两样东西在本仓库的 [Releases](../../releases/latest) 里，都已去除密钥和个人数据：
 
@@ -88,6 +155,7 @@ adb、拿到 root（人工约 5 分钟，零内核漏洞，不刷机），见
 
 ```sh
 # 充电口侧（port0）接 Mac
+adb pull /dev/block/by-name/super  super.img    # 最大，走 USB 最快；整个系统分区
 adb pull /dev/block/by-name/boot   boot.img
 adb pull /dev/block/by-name/vendor vendor.img   # 第 2 步会改 vendor
 # 拉取前后各算一次 sha256，必须一致

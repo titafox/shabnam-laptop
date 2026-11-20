@@ -293,6 +293,7 @@ messages! {
     SendToTitle: "发送到「{}」？", "Отправить на «{}»?", "Send to “{}”?";
     SendFingerprint: "证书指纹 {}", "Отпечаток сертификата: {}", "Certificate fingerprint {}";
     SendFirstTime: "还没有向这台设备发送过。请核对名称、地址和指纹，确认是你要发送的设备。", "На это устройство вы ещё не отправляли. Сверьте имя, адрес и отпечаток: это должно быть нужное устройство.", "You have not sent to this device before. Check its name, address and fingerprint: it should be the device you mean.";
+    SendKnownNote: "之前向这台设备发送过，证书相同。确认后开始发送。", "На это устройство вы уже отправляли, сертификат тот же. Подтвердите, чтобы начать отправку.", "You have sent to this device before; its certificate is the same. Confirm to start sending.";
     SendBack: "返回", "Назад", "Back";
     SendGo: "发送", "Отправить", "Send";
     SendPinTitle: "「{}」需要 PIN 码", "«{}» требует PIN-код", "“{}” asks for a PIN";
@@ -340,6 +341,9 @@ counted! {
     SendSentPart: "中断前已发送 {n} 个文件",
         ["До сбоя отправлен {n} файл", "До сбоя отправлено {n} файла", "До сбоя отправлено {n} файлов"],
         ["{n} file was sent before that", "{n} files were sent before that"];
+    SendMore: "还有 {n} 个文件",
+        ["и ещё {n} файл", "и ещё {n} файла", "и ещё {n} файлов"],
+        ["and {n} more file", "and {n} more files"];
     SendFileOf: "第 {n} 个，共 {} 个",
         ["Файл {n} из {}", "Файл {n} из {}", "Файл {n} из {}"],
         ["File {n} of {}", "File {n} of {}"];
@@ -463,6 +467,9 @@ mod tests {
         assert_eq!(Count::SendSent.text(Lang::Ru, 22, &[]), "Отправлено 22 файла");
         assert_eq!(Count::SendSent.text(Lang::Ru, 5, &[]), "Отправлено 5 файлов");
         assert_eq!(Count::SendFileOf.text(Lang::Ru, 2, &["3"]), "Файл 2 из 3");
+        assert_eq!(Count::SendMore.text(Lang::Ru, 21, &[]), "и ещё 21 файл");
+        assert_eq!(Count::SendMore.text(Lang::Ru, 3, &[]), "и ещё 3 файла");
+        assert_eq!(Count::SendMore.text(Lang::Ru, 495, &[]), "и ещё 495 файлов");
         assert_eq!(Count::SendFileOf.text(Lang::Zh, 2, &["3"]), "第 2 个，共 3 个");
         assert_eq!(Count::SendFileOf.text(Lang::En, 2, &["3"]), "File 2 of 3");
     }

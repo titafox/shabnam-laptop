@@ -43,7 +43,7 @@ use localsend::model::discovery::{DeviceType, ProtocolType, PROTOCOL_VERSION_V2}
 use localsend::model::transfer::FileContent;
 use shabnam_drop::ipc::{self, FromDaemon, FromSubmit, SendOutcome, SubmitRefusal, ToDaemon, ToSubmit};
 use shabnam_drop::net::{self, Identity, Net};
-use shabnam_drop::outgoing::{self, Entry, Left, Request, Stage};
+use shabnam_drop::outgoing::{Choice, self, Entry, Left, Request, Stage};
 use shabnam_drop::{fdpass, names, policy};
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -69,7 +69,7 @@ enum ClientEvent {
 /// From a requester's connection on the submit socket (a thread per connection reads it).
 enum SubmitEvent {
     /// It handed over these files (name, size, the open file) and is done.
-    Go { root: bool, files: Vec<(String, u64, std::fs::File)>, to: Option<String>, reply: Arc<UnixStream> },
+    Go { root: bool, files: Vec<(String, u64, Held)>, to: Option<String>, reply: Arc<UnixStream> },
     Confirm,
     Gone,
 }
@@ -91,9 +91,18 @@ enum Event {
     Stop,
 }
 
+/// A file a requester handed over, with its place in the budget of received descriptors: the
+/// place is free again when the file is closed.
+struct Held {
+    file: std::fs::File,
+    slot: policy::Slot,
+}
+
 /// The one send request there can be at a time.
 struct Out {
-    request: Request<Option<std::fs::File>>,
+    request: Request<Option<Held>>,
+    /// When it appeared (more files join it only shortly after).
+    opened: Instant,
     /// The requesters' connections, to tell them how it went.
     replies: HashMap<u64, Arc<UnixStream>>,
     searching: bool,
@@ -153,6 +162,8 @@ struct Daemon {
     requests: u64,
     /// Since when there has been nothing to send (for leaving when receiving is off).
     idle_since: Instant,
+    /// Until when programs of the desktop user get "busy": a request was just given up.
+    cooldown: Instant,
     /// Connections on the submit socket that are still alive.
     submitters: Arc<AtomicUsize>,
     parts: u32,
@@ -226,8 +237,25 @@ fn submit_listener() -> Result<std::os::unix::net::UnixListener, String> {
     listener.map_err(|e| format!("{path}: {e}"))
 }
 
+/// How many descriptors this process may have open. Raised to what the daemon wants
+/// (`policy::NOFILE_WANTED`) if the limit is lower and may be raised.
+fn descriptor_limit() -> u64 {
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } != 0 {
+        return 256;
+    }
+    if (limit.rlim_cur as u64) < policy::NOFILE_WANTED && limit.rlim_max > limit.rlim_cur {
+        let wanted = libc::rlimit { rlim_cur: (policy::NOFILE_WANTED as libc::rlim_t).min(limit.rlim_max), rlim_max: limit.rlim_max };
+        if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &wanted) } == 0 {
+            limit = wanted;
+        }
+    }
+    limit.rlim_cur as u64
+}
+
 /// Accepts requesters: the desktop user and root, nobody else, and not too many at once.
-fn serve_submit(listener: std::os::unix::net::UnixListener, events: mpsc::UnboundedSender<Event>, alive: Arc<AtomicUsize>) {
+/// `budget` counts the descriptors all of them together have handed over.
+fn serve_submit(listener: std::os::unix::net::UnixListener, events: mpsc::UnboundedSender<Event>, alive: Arc<AtomicUsize>, budget: Arc<policy::Budget>) {
     let desktop = net::user(ipc::DESKTOP_USER).map(|(uid, _, _)| uid).filter(|uid| *uid != 0);
     let mut next = 0u64;
     for stream in listener.incoming() {
@@ -244,9 +272,9 @@ fn serve_submit(listener: std::os::unix::net::UnixListener, events: mpsc::Unboun
             continue;
         }
         next += 1;
-        let (conn, events, alive) = (next, events.clone(), alive.clone());
+        let (conn, events, alive, budget) = (next, events.clone(), alive.clone(), budget.clone());
         std::thread::spawn(move || {
-            submit_conn(stream, conn, uid == Some(0), &events);
+            submit_conn(stream, conn, uid == Some(0), &events, &budget);
             alive.fetch_sub(1, Ordering::SeqCst);
         });
     }
@@ -254,14 +282,23 @@ fn serve_submit(listener: std::os::unix::net::UnixListener, events: mpsc::Unboun
 
 /// One requester: takes its files one message at a time, then waits until it goes away.
 /// Every descriptor must be a regular file open for reading; anything else ends the connection.
-fn submit_conn(stream: UnixStream, conn: u64, root: bool, events: &mpsc::UnboundedSender<Event>) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
+/// The hand-over has a deadline as a whole (`policy::HANDOVER`), and a place in the budget is
+/// taken before each descriptor is received: a requester that stalls, or that would take the
+/// daemon over its share of descriptors, is dropped, and what it handed over is closed.
+fn submit_conn(stream: UnixStream, conn: u64, root: bool, events: &mpsc::UnboundedSender<Event>, budget: &Arc<policy::Budget>) {
+    let started = Instant::now();
     let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
     let Ok(reply) = stream.try_clone().map(Arc::new) else { return };
     let say = |message: FromSubmit| (&stream).write_all(message.encode().as_bytes()).is_ok();
     let mut files = Vec::new();
     let mut bytes = 0u64;
     let to = loop {
+        let Some(left) = policy::handover_left(started.elapsed()) else { return };
+        let _ = stream.set_read_timeout(Some(left));
+        let Some(slot) = budget.take() else {
+            say(FromSubmit::Refused(SubmitRefusal::Busy));
+            return;
+        };
         let Ok(Some((line, mut fds))) = fdpass::recv_line(&stream, ipc::MAX_LINE) else { return };
         match ipc::parse_to_submit(&line) {
             Some(ToSubmit::File { name }) => {
@@ -274,7 +311,7 @@ fn submit_conn(stream: UnixStream, conn: u64, root: bool, events: &mpsc::Unbound
                     say(FromSubmit::Refused(why));
                     return;
                 }
-                files.push((names::sanitize(&name), size, std::fs::File::from(fds.pop().unwrap())));
+                files.push((names::sanitize(&name), size, Held { file: std::fs::File::from(fds.pop().unwrap()), slot }));
                 if !say(FromSubmit::Ok) {
                     return;
                 }
@@ -400,7 +437,8 @@ fn run() -> Result<(), String> {
         match submit_listener() {
             Ok(listener) => {
                 let (events, alive) = (events.clone(), submitters.clone());
-                std::thread::spawn(move || serve_submit(listener, events, alive));
+                let budget = policy::Budget::new(policy::fd_budget(descriptor_limit()));
+                std::thread::spawn(move || serve_submit(listener, events, alive, budget));
             }
             Err(e) => eprintln!("shabnam-dropd: sending from the desktop is not available: {e}"),
         }
@@ -417,6 +455,7 @@ fn run() -> Result<(), String> {
             outgoing: None,
             requests: 0,
             idle_since: Instant::now(),
+            cooldown: Instant::now(),
             submitters,
             parts: 0,
             events,
@@ -692,13 +731,26 @@ impl Daemon {
                     }
                     // Where the files go is said here and nowhere else: by root's connection,
                     // naming one of the devices that were listed for this request.
-                    (ToDaemon::SendTo { id, fingerprint, host, port }, true) => {
+                    (ToDaemon::SendTo { id, revision, fingerprint, host, port }, true) => {
                         let Some(out) = self.outgoing.as_mut().filter(|o| o.request.id == id && o.request.stage == Stage::Picking) else { return true };
-                        match out.request.choose(&fingerprint, &host, port) {
-                            Some(device) => self.begin_send(device).await,
+                        // Whatever comes of it, the owner has used the picker.
+                        out.request.touch();
+                        match out.request.choose(revision, &fingerprint, &host, port) {
+                            Choice::Go(device) => self.begin_send(device).await,
+                            // Chosen for a set of files that has changed since: nothing is sent;
+                            // the picker starts over with the files as they are.
+                            Choice::Stale => {
+                                let message = Self::send_request_of(out);
+                                self.tell(message);
+                            }
                             // Not (or no longer) one of the listed devices: the request ends
                             // rather than wait for a picker that has closed.
-                            None => self.finish_send(SendOutcome::Unreachable, 0).await,
+                            Choice::No => self.finish_send(SendOutcome::Unreachable, 0).await,
+                        }
+                    }
+                    (ToDaemon::SendTouch { id }, true) => {
+                        if let Some(out) = self.outgoing.as_mut().filter(|o| o.request.id == id) {
+                            out.request.touch();
                         }
                     }
                     (ToDaemon::SendPin { id, pin }, true) => {
@@ -903,9 +955,11 @@ impl Daemon {
     fn send_request_of(out: &Out) -> FromDaemon {
         FromDaemon::SendRequest {
             id: out.request.id.clone(),
+            revision: out.request.revision,
             count: out.request.count() as u32,
             bytes: out.request.bytes(),
-            name: ipc::tidy(out.request.first_name(), 120),
+            names: out.request.files.iter().take(ipc::SHOWN_NAMES).map(|f| ipc::tidy(&f.name, 120)).collect(),
+            by_root: out.request.by_root(),
         }
     }
 
@@ -917,7 +971,7 @@ impl Daemon {
                     tell_requester(&reply, FromSubmit::Refused(why));
                     let _ = reply.shutdown(std::net::Shutdown::Both);
                 };
-                let entries: Vec<Entry<Option<std::fs::File>>> = files.into_iter().map(|(name, size, file)| Entry { conn, name, size, payload: Some(file) }).collect();
+                let entries: Vec<Entry<Option<Held>>> = files.into_iter().map(|(name, size, held)| Entry { conn, root, name, size, payload: Some(held) }).collect();
                 // The target is the owner's to choose. Only root's own command may name one.
                 if to.is_some() && !root {
                     return refuse(SubmitRefusal::NotAllowed);
@@ -926,8 +980,9 @@ impl Daemon {
                     return refuse(SubmitRefusal::Busy);
                 }
                 if let Some(out) = self.outgoing.as_mut() {
-                    // More files for the picker that is already up.
-                    let added = if to.is_some() { Err(SubmitRefusal::Busy) } else { out.request.add(entries) };
+                    // More files for the picker that has just come up (the file manager's
+                    // burst); later, or once the owner has used the picker, it is "busy".
+                    let added = if to.is_some() { Err(SubmitRefusal::Busy) } else { out.request.add(entries, out.opened.elapsed()) };
                     if let Err(why) = added {
                         return refuse(why);
                     }
@@ -935,6 +990,11 @@ impl Daemon {
                     tell_requester(&reply, FromSubmit::Queued);
                     let message = Self::send_request_of(out);
                     return self.tell(message);
+                }
+                // A request was just given up: the desktop user's programs cannot bring the
+                // picker straight back.
+                if !root && Instant::now() < self.cooldown {
+                    return refuse(SubmitRefusal::Busy);
                 }
                 let auto = to.is_some();
                 if !auto && !self.shell_connected() {
@@ -944,6 +1004,7 @@ impl Daemon {
                 let now = Instant::now();
                 let out = Out {
                     request: Request::new(format!("o-{}-{}", std::process::id(), self.requests), conn, entries, to),
+                    opened: now,
                     replies: HashMap::from([(conn, reply.clone())]),
                     searching: false,
                     listed: None,
@@ -1008,7 +1069,8 @@ impl Daemon {
         let Some(out) = self.outgoing.as_mut().filter(|_| on_wifi) else {
             return self.finish_send(SendOutcome::Unreachable, 0).await;
         };
-        let files: Vec<(String, u64, std::fs::File)> = out.request.files.iter_mut().filter_map(|f| Some((f.name.clone(), f.size, f.payload.take()?))).collect();
+        let (files, slots): (Vec<(String, u64, std::fs::File)>, Vec<policy::Slot>) =
+            out.request.files.iter_mut().filter_map(|f| f.payload.take().map(|held| ((f.name.clone(), f.size, held.file), held.slot))).unzip();
         let (pin_tx, pin_rx) = mpsc::channel(1);
         out.pin_tx = Some(pin_tx);
         out.deadline = Instant::now() + Duration::from_secs(policy::SEND_WAIT_SECONDS);
@@ -1021,6 +1083,7 @@ impl Daemon {
             key_pem: self.identity.key_pem.clone(),
             device: device.clone(),
             files,
+            _slots: slots,
             pin_rx,
             events: self.events.clone(),
             cancel: out.cancel.clone(),
@@ -1041,6 +1104,9 @@ impl Daemon {
     async fn finish_send(&mut self, outcome: SendOutcome, sent: u32) {
         let Some(out) = self.outgoing.take() else { return };
         out.cancel.cancel();
+        if outcome == SendOutcome::Cancelled && !out.request.is_auto() {
+            self.cooldown = Instant::now() + policy::SEND_COOLDOWN;
+        }
         let to = out.request.target.as_ref().map(|d| d.alias.clone()).unwrap_or_default();
         self.tell(FromDaemon::SendDone { id: out.request.id.clone(), to: to.clone(), outcome, sent });
         for reply in out.replies.values() {
@@ -1279,6 +1345,8 @@ struct SendJob {
     key_pem: String,
     device: ipc::Device,
     files: Vec<(String, u64, std::fs::File)>,
+    /// The files' places in the descriptor budget, free again when the job is over.
+    _slots: Vec<policy::Slot>,
     pin_rx: mpsc::Receiver<String>,
     events: mpsc::UnboundedSender<Event>,
     cancel: CancellationToken,

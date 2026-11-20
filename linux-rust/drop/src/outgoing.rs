@@ -7,9 +7,16 @@
 //! user the target is one of the devices the daemon listed to the shell, chosen there by the
 //! owner (`choose`, called only for root's shell connection). Only root's own `shabnam-send --to`
 //! names a target itself, and then confirms the device that was found (`confirm`).
+//!
+//! And the owner's choice is a choice for exactly the files that were shown: every change to
+//! the set of files gives the request a new `revision`, the shell names the revision it showed
+//! when it reports the choice, and a choice for an older one is not taken. Files join a request
+//! only shortly after it appeared (`policy::MERGE_WINDOW`) and never after the owner has
+//! started to use the picker (`touch`).
 
 use crate::ipc::{Device, SubmitRefusal};
 use crate::policy;
+use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Stage {
@@ -30,6 +37,8 @@ pub enum Stage {
 pub struct Entry<T> {
     /// The submit connection it came from.
     pub conn: u64,
+    /// That connection was root's own command, not a program of the desktop user.
+    pub root: bool,
     /// Already rewritten into a harmless name.
     pub name: String,
     pub size: u64,
@@ -47,11 +56,26 @@ pub enum Left {
     Empty,
 }
 
+/// What became of the owner's choice.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Choice {
+    /// Taken: the files go to this device.
+    Go(Device),
+    /// Made for a set of files that has changed since: the owner is asked again.
+    Stale,
+    /// Not a choice that can be made (no such device listed, not the time for it).
+    No,
+}
+
 #[derive(Debug)]
 pub struct Request<T> {
     pub id: String,
     pub stage: Stage,
     pub files: Vec<Entry<T>>,
+    /// Changes whenever the set of files does.
+    pub revision: u32,
+    /// The owner has used the picker: the set of files is closed.
+    touched: bool,
     /// `--to`: the name or address root asked for, and the connection that may confirm it.
     auto: Option<(String, u64)>,
     /// The devices last listed to the shell: the only ones that can be chosen.
@@ -62,7 +86,7 @@ pub struct Request<T> {
 impl<T> Request<T> {
     /// A new request. `to` must only be passed on for root's connection (the caller checks that).
     pub fn new(id: String, conn: u64, files: Vec<Entry<T>>, to: Option<String>) -> Request<T> {
-        Request { id, stage: Stage::Picking, files, auto: to.map(|to| (to, conn)), shown: Vec::new(), target: None }
+        Request { id, stage: Stage::Picking, files, revision: 1, touched: false, auto: to.map(|to| (to, conn)), shown: Vec::new(), target: None }
     }
 
     /// True when the target comes from the requester (root's `--to`), not from the picker.
@@ -82,15 +106,28 @@ impl<T> Request<T> {
         self.files.first().map(|f| f.name.as_str()).unwrap_or("")
     }
 
+    /// True when every file came from root's own command.
+    pub fn by_root(&self) -> bool {
+        self.files.iter().all(|f| f.root)
+    }
+
+    /// The owner has started to use the picker.
+    pub fn touch(&mut self) {
+        self.touched = true;
+    }
+
     /// More files for the same picker (the file manager starts one sender per selected file).
-    /// Only while the picker is still up, never for a `--to` request, and within the limits.
-    pub fn add(&mut self, files: Vec<Entry<T>>) -> Result<(), SubmitRefusal> {
-        if self.stage != Stage::Picking || self.is_auto() {
+    /// Only shortly after the request appeared (`age` is how long ago that was), only before the
+    /// owner has used the picker, never for a `--to` request, and within the limits. What the
+    /// owner is asked about afterwards is a new revision.
+    pub fn add(&mut self, files: Vec<Entry<T>>, age: Duration) -> Result<(), SubmitRefusal> {
+        if self.stage != Stage::Picking || self.is_auto() || self.touched || age > policy::MERGE_WINDOW {
             return Err(SubmitRefusal::Busy);
         }
         let bytes = files.iter().map(|f| f.size).fold(self.bytes(), u64::saturating_add);
         policy::check_send(self.files.len() + files.len(), bytes)?;
         self.files.extend(files);
+        self.revision += 1;
         Ok(())
     }
 
@@ -108,6 +145,7 @@ impl<T> Request<T> {
             return Left::Unchanged;
         }
         self.files.retain(|f| f.conn != conn);
+        self.revision += 1;
         if self.files.is_empty() {
             Left::Empty
         } else {
@@ -125,16 +163,20 @@ impl<T> Request<T> {
     }
 
     /// The owner's choice, as the shell reports it: accepted only for a picker request that is
-    /// still waiting for one, and only if exactly this device — fingerprint, address and port —
-    /// is among those that were listed.
-    pub fn choose(&mut self, fingerprint: &str, host: &str, port: u16) -> Option<Device> {
+    /// still waiting for one, only if it was made looking at the files as they are now
+    /// (`revision`), and only if exactly this device — fingerprint, address and port — is among
+    /// those that were listed.
+    pub fn choose(&mut self, revision: u32, fingerprint: &str, host: &str, port: u16) -> Choice {
         if self.stage != Stage::Picking || self.is_auto() {
-            return None;
+            return Choice::No;
         }
-        let device = self.shown.iter().find(|d| d.fingerprint == fingerprint && d.host == host && d.port == port)?.clone();
+        if revision != self.revision {
+            return Choice::Stale;
+        }
+        let Some(device) = self.shown.iter().find(|d| d.fingerprint == fingerprint && d.host == host && d.port == port).cloned() else { return Choice::No };
         self.target = Some(device.clone());
         self.stage = Stage::Waiting;
-        Some(device)
+        Choice::Go(device)
     }
 
     /// `--to`: the device with the wanted name or address among `list`, if it is there now.
@@ -198,7 +240,7 @@ mod tests {
     }
 
     fn files(conn: u64, sizes: &[u64]) -> Vec<Entry<()>> {
-        sizes.iter().enumerate().map(|(i, size)| Entry { conn, name: format!("f{conn}-{i}"), size: *size, payload: () }).collect()
+        sizes.iter().enumerate().map(|(i, size)| Entry { conn, root: conn >= 100, name: format!("f{conn}-{i}"), size: *size, payload: () }).collect()
     }
 
     fn picker() -> Request<()> {
@@ -210,18 +252,18 @@ mod tests {
         let mut request = picker();
         let phone = device("Phone", "192.0.2.5");
         // Nothing was listed yet: nothing can be chosen.
-        assert_eq!(request.choose(&phone.fingerprint, &phone.host, phone.port), None);
+        assert_eq!(request.choose(1, &phone.fingerprint, &phone.host, phone.port), Choice::No);
         assert!(request.show(vec![phone.clone(), device("Mac", "192.0.2.6")]));
         assert!(!request.show(vec![phone.clone(), device("Mac", "192.0.2.6")]), "the same list again is no news");
         // Right fingerprint at another address, another port, an unknown fingerprint: no.
-        assert_eq!(request.choose(&phone.fingerprint, "192.0.2.99", phone.port), None);
-        assert_eq!(request.choose(&phone.fingerprint, &phone.host, 1), None);
-        assert_eq!(request.choose("FPOTHER", &phone.host, phone.port), None);
+        assert_eq!(request.choose(1, &phone.fingerprint, "192.0.2.99", phone.port), Choice::No);
+        assert_eq!(request.choose(1, &phone.fingerprint, &phone.host, 1), Choice::No);
+        assert_eq!(request.choose(1, "FPOTHER", &phone.host, phone.port), Choice::No);
         assert_eq!(request.stage, Stage::Picking);
-        assert_eq!(request.choose(&phone.fingerprint, &phone.host, phone.port), Some(phone.clone()));
+        assert_eq!(request.choose(1, &phone.fingerprint, &phone.host, phone.port), Choice::Go(phone.clone()));
         assert_eq!((request.stage, request.target.clone()), (Stage::Waiting, Some(phone.clone())));
         // Once chosen it cannot be chosen again or elsewhere.
-        assert_eq!(request.choose("FPMAC", "192.0.2.6", 53317), None);
+        assert_eq!(request.choose(1, "FPMAC", "192.0.2.6", 53317), Choice::No);
         assert_eq!(request.target, Some(phone));
     }
 
@@ -237,23 +279,72 @@ mod tests {
 
     #[test]
     fn files_are_added_only_while_the_picker_is_up() {
+        let soon = Duration::from_millis(300);
         let mut request = picker();
-        assert_eq!(request.add(files(2, &[5])), Ok(()));
+        assert_eq!(request.add(files(2, &[5]), soon), Ok(()));
         assert_eq!((request.count(), request.bytes(), request.first_name()), (3, 35, "f1-0"));
-        assert_eq!(request.add(files(3, &[policy::MAX_TOTAL])), Err(SubmitRefusal::TooBig));
-        assert_eq!(request.add(files(3, &vec![1; policy::MAX_FILES])), Err(SubmitRefusal::TooMany));
+        assert_eq!(request.add(files(3, &[policy::MAX_TOTAL]), soon), Err(SubmitRefusal::TooBig));
+        assert_eq!(request.add(files(3, &vec![1; policy::MAX_FILES]), soon), Err(SubmitRefusal::TooMany));
         assert_eq!(request.count(), 3, "a refused addition adds nothing");
         request.show(vec![device("Phone", "192.0.2.5")]);
-        request.choose("FPPHONE", "192.0.2.5", 53317).unwrap();
-        assert_eq!(request.add(files(4, &[1])), Err(SubmitRefusal::Busy));
+        assert!(matches!(request.choose(request.revision, "FPPHONE", "192.0.2.5", 53317), Choice::Go(_)));
+        assert_eq!(request.add(files(4, &[1]), soon), Err(SubmitRefusal::Busy));
         let mut to = Request::new("o-2".into(), 1, files(1, &[1]), Some("Mac".into()));
-        assert_eq!(to.add(files(2, &[1])), Err(SubmitRefusal::Busy));
+        assert_eq!(to.add(files(2, &[1]), soon), Err(SubmitRefusal::Busy));
+    }
+
+    #[test]
+    fn files_join_only_at_the_start_and_never_once_the_owner_is_at_it() {
+        let mut request = picker();
+        assert_eq!(request.add(files(2, &[5]), policy::MERGE_WINDOW), Ok(()));
+        // The burst is over: what comes now is somebody else's business.
+        assert_eq!(request.add(files(3, &[5]), policy::MERGE_WINDOW + Duration::from_millis(1)), Err(SubmitRefusal::Busy));
+        assert_eq!(request.add(files(3, &[5]), Duration::from_secs(60)), Err(SubmitRefusal::Busy));
+        assert_eq!((request.count(), request.revision), (3, 2));
+        // The owner clicked in the picker right away: closed, even inside the window.
+        let mut request = picker();
+        request.touch();
+        assert_eq!(request.add(files(2, &[5]), Duration::ZERO), Err(SubmitRefusal::Busy));
+        assert_eq!((request.count(), request.revision), (2, 1));
+    }
+
+    #[test]
+    fn a_choice_counts_only_for_the_files_that_were_shown() {
+        let phone = device("Phone", "192.0.2.5");
+        let mut request = picker();
+        request.show(vec![phone.clone()]);
+        assert_eq!(request.revision, 1);
+        // The owner is looking at two files; a third is slipped in.
+        assert_eq!(request.add(files(2, &[5]), Duration::from_millis(100)), Ok(()));
+        assert_eq!(request.revision, 2);
+        assert_eq!(request.choose(1, &phone.fingerprint, &phone.host, phone.port), Choice::Stale);
+        assert_eq!((request.stage, request.target.clone(), request.count()), (Stage::Picking, None, 3), "nothing was sent anywhere");
+        // A requester taking its files back changes the set as well.
+        assert_eq!(request.left(2), Left::Fewer);
+        assert_eq!(request.revision, 3);
+        assert_eq!(request.choose(2, &phone.fingerprint, &phone.host, phone.port), Choice::Stale);
+        assert_eq!(request.choose(u32::MAX, &phone.fingerprint, &phone.host, phone.port), Choice::Stale);
+        // Asked again, with what is there now.
+        assert_eq!(request.choose(3, &phone.fingerprint, &phone.host, phone.port), Choice::Go(phone));
+        // A stale number for a device that is not listed is still just "stale" — nothing is learnt from it.
+        let mut request = picker();
+        assert_eq!(request.choose(7, "FPNONE", "192.0.2.9", 1), Choice::Stale);
+    }
+
+    #[test]
+    fn who_asked_is_remembered() {
+        assert!(!picker().by_root());
+        let mut request = Request::new("o-5".into(), 100, files(100, &[1]), None);
+        assert!(request.by_root());
+        // One file from a program of the desktop user, and it is no longer root's request.
+        request.add(files(2, &[1]), Duration::ZERO).unwrap();
+        assert!(!request.by_root());
     }
 
     #[test]
     fn a_requester_that_leaves_takes_its_files_along() {
         let mut request = picker();
-        request.add(files(2, &[5])).unwrap();
+        request.add(files(2, &[5]), Duration::ZERO).unwrap();
         assert_eq!(request.left(9), Left::Unchanged);
         assert_eq!(request.left(1), Left::Fewer);
         assert_eq!((request.count(), request.bytes()), (1, 5));
@@ -261,7 +352,7 @@ mod tests {
         // After the owner has chosen, the request no longer depends on the requester.
         let mut request = picker();
         request.show(vec![device("Phone", "192.0.2.5")]);
-        request.choose("FPPHONE", "192.0.2.5", 53317).unwrap();
+        assert!(matches!(request.choose(request.revision, "FPPHONE", "192.0.2.5", 53317), Choice::Go(_)));
         assert_eq!(request.left(1), Left::Unchanged);
         assert_eq!(request.count(), 2);
     }
@@ -274,7 +365,7 @@ mod tests {
         assert_eq!(request.confirm(7), None, "nothing to confirm yet");
         // The shell cannot choose for it.
         request.show(vec![device("Phone", "192.0.2.5")]);
-        assert_eq!(request.choose("FPPHONE", "192.0.2.5", 53317), None);
+        assert_eq!(request.choose(1, "FPPHONE", "192.0.2.5", 53317), Choice::No);
         let mac = device("TestMac", "192.0.2.6");
         assert_eq!(request.find_wanted(&[device("Phone", "192.0.2.5"), mac.clone()]), Some(mac.clone()));
         assert_eq!(request.stage, Stage::Confirming);
@@ -293,7 +384,7 @@ mod tests {
         let mut request = picker();
         assert!(!request.pin_wanted(), "not before a target was chosen");
         request.show(vec![device("Phone", "192.0.2.5")]);
-        request.choose("FPPHONE", "192.0.2.5", 53317).unwrap();
+        assert!(matches!(request.choose(request.revision, "FPPHONE", "192.0.2.5", 53317), Choice::Go(_)));
         assert!(!request.pin_given());
         assert!(request.pin_wanted());
         assert_eq!(request.stage, Stage::PinWanted);

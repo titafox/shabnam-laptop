@@ -11,6 +11,17 @@
 //! every device is listed with name, address and certificate fingerprint; a device the owner
 //! has sent to before (remembered by fingerprint) is marked and sends at one click, any other
 //! asks for a second, explicit confirmation. No key confirms a send.
+//!
+//! Since the picker appears when such a program wants it to, it must not be possible to time
+//! it under a click the owner meant for something else, nor to change what is being sent
+//! between the look and the click:
+//! - for `GUARD` after the picker appears, and after anything in it changes (the files, the
+//!   device list, the view), presses in it are ignored and it is drawn dimmed;
+//! - a click counts when it is pressed and released on the same row or button;
+//! - a request from a program of the desktop user always goes through the confirmation step,
+//!   whether the device is known or not (one click is only for requests root started itself);
+//! - every file name is listed (the first few, and how many more), and the choice is sent with
+//!   the revision of the file set that was on the screen: the daemon refuses it for another.
 
 use super::{inside, wrap, Act, Key, Panel, QuickHit, QuickLayout, Rect, Ui, ACCENT, CHIP, HOVER, ON_ACCENT, PANEL, TEXT, TEXT2, WARN};
 use crate::draw::{argb, Canvas};
@@ -119,12 +130,30 @@ enum Wish {
     Redraw,
 }
 
+/// How long the picker ignores presses after it appeared or changed: long enough that a click
+/// already on its way when the picker came up (a double click's second half, a click aimed at
+/// what was there before) lands on nothing, short enough not to be felt by someone reading it.
+const GUARD: Duration = Duration::from_millis(700);
+/// File names listed in the picker; of more, the first `NAME_LINES - 1` and a count.
+const NAME_LINES: usize = 6;
+
 #[derive(Clone, PartialEq, Debug)]
 struct SendUi {
     id: String,
+    /// Which set of files this is (it goes back with the choice).
+    revision: u32,
     count: u32,
     bytes: u64,
-    name: String,
+    /// The first names of the files.
+    names: Vec<String>,
+    /// The request is root's own, not one of a program of the desktop user.
+    by_root: bool,
+    /// Presses before this moment are ignored.
+    quiet_until: Instant,
+    /// What the pointer was pressed on (after the quiet time); a release on the same acts.
+    pressed: Option<SendHit>,
+    /// The daemon has been told that the owner is using the picker.
+    touched: bool,
     devices: Vec<Device>,
     searching: bool,
     view: SendView,
@@ -142,9 +171,60 @@ struct SendUi {
 }
 
 impl SendUi {
-    fn new(id: String, count: u32, bytes: u64, name: String) -> SendUi {
+    fn new(id: String, revision: u32, count: u32, bytes: u64, names: Vec<String>, by_root: bool, now: Instant) -> SendUi {
         // "Searching" until the first list arrives.
-        SendUi { id, count, bytes, name, devices: Vec::new(), searching: true, view: SendView::List, target: None, committed: false, pin: String::new(), hover: None, scroll: 0.0, demo: false, no_wifi: false }
+        SendUi {
+            id,
+            revision,
+            count,
+            bytes,
+            names,
+            by_root,
+            quiet_until: now + GUARD,
+            pressed: None,
+            touched: false,
+            devices: Vec::new(),
+            searching: true,
+            view: SendView::List,
+            target: None,
+            committed: false,
+            pin: String::new(),
+            hover: None,
+            scroll: 0.0,
+            demo: false,
+            no_wifi: false,
+        }
+    }
+
+    /// Something the owner would have to read again changed: no press counts for a moment.
+    fn hush(&mut self, now: Instant) {
+        (self.quiet_until, self.pressed, self.hover) = (now + GUARD, None, None);
+    }
+
+    fn quiet(&self, now: Instant) -> bool {
+        now < self.quiet_until
+    }
+
+    /// The pointer went down on `hit` (None: on nothing). During the quiet time it is not noted.
+    fn press(&mut self, hit: Option<SendHit>, now: Instant) {
+        self.pressed = if self.quiet(now) { None } else { hit };
+    }
+
+    /// The pointer came up on `hit`: a click, if that is what it went down on.
+    fn release(&mut self, hit: Option<SendHit>, now: Instant) -> Option<SendHit> {
+        let pressed = self.pressed.take()?;
+        (Some(pressed) == hit && !self.quiet(now)).then_some(pressed)
+    }
+
+    /// The lines of the file list: the names, or the first of them and how many more.
+    fn name_lines(&self) -> (usize, u32) {
+        let count = self.count as usize;
+        if count <= NAME_LINES.min(self.names.len()) {
+            (count, 0)
+        } else {
+            let shown = self.names.len().min(NAME_LINES - 1);
+            (shown, (count - shown) as u32)
+        }
     }
 
     /// The buttons at the bottom: the left one (if any) and the right one.
@@ -246,15 +326,25 @@ impl DropUi {
             FromDaemon::Refused { from, why } => self.show(Notice::Refused { from, why }),
             FromDaemon::Text { from, text } => self.show(Notice::Text { from, text }),
             FromDaemon::Devices(_) => return false,
-            FromDaemon::SendRequest { id, count, bytes, name } => {
+            FromDaemon::SendRequest { id, revision, count, bytes, names, by_root } => {
+                let now = Instant::now();
                 match self.send.as_mut().filter(|s| s.id == id && !s.demo) {
-                    // More files for the picker that is up.
+                    // The files of the picker that is up changed, or the daemon did not take a
+                    // choice because it was made for other files: the owner starts over, with
+                    // what is there now, and nothing chosen.
                     Some(send) => {
-                        (send.count, send.bytes, send.name) = (count, bytes, name);
-                        self.wish = Some(Wish::Redraw);
+                        let again = send.revision != revision || send.committed;
+                        (send.revision, send.count, send.bytes, send.names, send.by_root) = (revision, count, bytes, names, by_root);
+                        if again && !matches!(send.view, SendView::Pin { .. }) {
+                            (send.view, send.target, send.committed) = (SendView::List, None, false);
+                            send.hush(now);
+                            self.wish = Some(Wish::Open);
+                        } else {
+                            self.wish = Some(Wish::Redraw);
+                        }
                     }
                     None => {
-                        self.send = Some(SendUi::new(id, count, bytes, name));
+                        self.send = Some(SendUi::new(id, revision, count, bytes, names, by_root, now));
                         self.wish = Some(Wish::Open);
                     }
                 }
@@ -266,6 +356,10 @@ impl DropUi {
                     if matches!(&send.view, SendView::Confirm(device) if !list.contains(device)) {
                         send.view = SendView::List;
                     }
+                    // Rows may have moved under the pointer.
+                    if send.devices != list {
+                        send.hush(Instant::now());
+                    }
                     (send.devices, send.searching, send.hover) = (list, searching, None);
                     self.wish = Some(Wish::Redraw);
                 }
@@ -274,9 +368,11 @@ impl DropUi {
             FromDaemon::SendPinWanted { id, wrong } => {
                 let send = match self.send.take().filter(|s| s.id == id && !s.demo) {
                     Some(send) => send,
-                    None => SendUi::new(id, 0, 0, String::new()),
+                    None => SendUi::new(id, 0, 0, 0, Vec::new(), false, Instant::now()),
                 };
-                self.send = Some(SendUi { view: SendView::Pin { wrong }, committed: false, pin: String::new(), hover: None, ..send });
+                let mut send = SendUi { view: SendView::Pin { wrong }, committed: false, pin: String::new(), ..send };
+                send.hush(Instant::now());
+                self.send = Some(send);
                 self.wish = Some(Wish::Open);
                 // The "waiting" card goes while the PIN is asked for.
                 if matches!(self.notice, Some(Notice::Sending { .. })) {
@@ -327,15 +423,18 @@ impl DropUi {
             return (None, true);
         }
         let to = |send: &mut SendUi, device: Device| {
-            let message = ToDaemon::SendTo { id: send.id.clone(), fingerprint: device.fingerprint.clone(), host: device.host.clone(), port: device.port };
+            let message = ToDaemon::SendTo { id: send.id.clone(), revision: send.revision, fingerprint: device.fingerprint.clone(), host: device.host.clone(), port: device.port };
             (send.target, send.committed) = (Some(device), true);
             (Some(message), true)
         };
         match (send.view.clone(), hit) {
             (SendView::List, SendHit::Row(row)) => match send.devices.get(row).cloned() {
-                Some(device) if is_known(known, &device) => to(send, device),
+                // One click only for a request root started itself, to a device sent to before.
+                // What a program of the desktop user asked for is always confirmed.
+                Some(device) if send.by_root && is_known(known, &device) => to(send, device),
                 Some(device) => {
-                    (send.view, send.hover) = (SendView::Confirm(device), None);
+                    send.view = SendView::Confirm(device);
+                    send.hush(Instant::now());
                     (None, false)
                 }
                 None => (None, false),
@@ -346,7 +445,8 @@ impl DropUi {
             }
             (SendView::Confirm(device), SendHit::Go) => to(send, device),
             (SendView::Confirm(_), SendHit::Back) => {
-                (send.view, send.hover) = (SendView::List, None);
+                send.view = SendView::List;
+                send.hush(Instant::now());
                 (None, false)
             }
             (SendView::Pin { .. }, SendHit::Go) if !send.pin.is_empty() => {
@@ -357,6 +457,14 @@ impl DropUi {
             (_, SendHit::Cancel) => (None, true),
             _ => (None, false),
         }
+    }
+
+    /// The first time the owner does something in the picker, the daemon is told: from then on
+    /// it adds nothing to the request.
+    fn touch(&mut self) -> Option<ToDaemon> {
+        let send = self.send.as_mut().filter(|s| !s.demo && !s.touched)?;
+        send.touched = true;
+        Some(ToDaemon::SendTouch { id: send.id.clone() })
     }
 
     /// The picker went away (cancel, Escape, a click beside it, another panel): unless the owner
@@ -730,7 +838,9 @@ impl Ui {
 // ---------- sending: the picker panel ----------
 
 const SEND_W: f32 = 468.0;
+/// The heading without the list of file names, and one line of that list.
 const SEND_HEAD: f32 = 92.0;
+const NAME_LINE: f32 = 18.0;
 const SEND_FOOT: f32 = 62.0;
 const SEND_ROW: f32 = 58.0;
 /// Rows shown without scrolling.
@@ -797,16 +907,18 @@ impl Ui {
             SendView::Confirm(_) => 128.0,
             SendView::Pin { .. } => 84.0,
         };
-        let h = SEND_HEAD + body_h + SEND_FOOT;
+        let (names, more) = send.name_lines();
+        let head = SEND_HEAD + (names + usize::from(more > 0)) as f32 * NAME_LINE + if send.count > 0 { 6.0 } else { 0.0 };
+        let h = head + body_h + SEND_FOOT;
         let (x, y) = (((pw - w) / 2.0).round(), ((ph - h) * 0.42).max(12.0).round());
         let right = (x + w - 18.0 - 124.0, y + h - 18.0 - 34.0, 124.0, 34.0);
         Some(SendLayout {
             rect: (x, y, w, h),
-            body: (x + 18.0, y + SEND_HEAD, w - 36.0, body_h),
-            rows: (x + 8.0, y + SEND_HEAD, w - 16.0, shown),
+            body: (x + 18.0, y + head, w - 36.0, body_h),
+            rows: (x + 8.0, y + head, w - 16.0, shown),
             left: (right.0 - 10.0 - 136.0, right.1, 136.0, 34.0),
             right,
-            field: (x + 18.0, y + SEND_HEAD + 2.0, w - 36.0, 42.0),
+            field: (x + 18.0, y + head + 2.0, w - 36.0, 42.0),
         })
     }
 
@@ -854,6 +966,9 @@ impl Ui {
 
     /// One of the picker's buttons or rows was clicked (or a test command says so).
     fn send_do(&mut self, hit: SendHit) -> Act {
+        if let Some(message) = self.drop.touch() {
+            self.drop.send(Request::Send(message));
+        }
         let (message, close) = self.drop.send_click(hit);
         if let Some(message) = message {
             self.drop.send(Request::Send(message));
@@ -866,11 +981,28 @@ impl Ui {
         }
     }
 
-    pub(super) fn send_press(&mut self, x: f32, y: f32) -> Act {
-        match self.send_hit(x, y) {
+    /// The pointer went down in the picker. Nothing happens yet: see `send_release`.
+    pub(super) fn send_press(&mut self, x: f32, y: f32) {
+        let hit = self.send_hit(x, y);
+        if let Some(send) = self.drop.send.as_mut() {
+            send.press(hit, Instant::now());
+        }
+    }
+
+    /// The pointer came up: a click, if it went down on the same row or button, and not in the
+    /// moment after the picker appeared or changed.
+    pub(super) fn send_release(&mut self, x: f32, y: f32) -> Act {
+        let hit = self.send_hit(x, y);
+        match self.drop.send.as_mut().and_then(|send| send.release(hit, Instant::now())) {
             Some(hit) => self.send_do(hit),
             None => Act::None,
         }
+    }
+
+    /// While the picker ignores presses: how long that still lasts (main.rs redraws it then).
+    pub fn send_quiet_left(&self) -> Option<Duration> {
+        let send = self.drop.send.as_ref().filter(|_| self.open == Some(Panel::Send))?;
+        send.quiet_until.checked_duration_since(Instant::now()).filter(|left| !left.is_zero())
     }
 
     /// The keyboard in the picker: Escape closes it; a PIN can be typed and entered. No key
@@ -902,14 +1034,16 @@ impl Ui {
         }
     }
 
-    fn send_button(&mut self, c: &mut Canvas, rect: Rect, label: Msg, strong: bool, hover: bool) {
+    /// `live` false: drawn as it is while presses are ignored — dimmed, no highlight.
+    fn send_button(&mut self, c: &mut Canvas, rect: Rect, label: Msg, strong: bool, hover: bool, live: bool) {
         let (x, y, w, h) = rect;
+        let (strong, hover) = (strong && live, hover && live);
         c.rrect(x, y, w, h, 17.0, if strong { ACCENT } else { CHIP });
         if hover {
             c.rrect(x, y, w, h, 17.0, if strong { argb(0x33FFFFFF) } else { HOVER });
         }
         let label = self.t(label);
-        self.label_centered(c, label, x + w / 2.0, y + h / 2.0, 13.0, w - 14.0, if strong { ON_ACCENT } else { TEXT });
+        self.label_centered(c, label, x + w / 2.0, y + h / 2.0, 13.0, w - 14.0, if strong { ON_ACCENT } else if live { TEXT } else { TEXT2 });
     }
 
     pub(super) fn draw_send(&mut self, c: &mut Canvas) {
@@ -930,18 +1064,32 @@ impl Ui {
             (_, Some(device)) => device.alias.clone(),
             _ => "…".to_string(),
         };
+        // While presses are ignored the picker says so by being dimmed.
+        let live = !send.quiet(Instant::now());
         let files = Count::SendFiles.text(lang, send.count as u64, &[]);
-        let first = if send.count == 1 { send.name.clone() } else { fill(self.t(Msg::DropAndMore), &[&send.name]) };
+        let size = lang::human_size(lang, send.bytes);
         let (line, sub) = match &send.view {
-            SendView::List => (files, format!("{first} · {}", lang::human_size(lang, send.bytes))),
-            SendView::Confirm(_) => (fill(self.t(Msg::SendToTitle), &[&alias]), format!("{files} · {first} · {}", lang::human_size(lang, send.bytes))),
+            SendView::List => (files, size),
+            SendView::Confirm(_) => (fill(self.t(Msg::SendToTitle), &[&alias]), format!("{files} · {size}")),
             SendView::Pin { .. } if send.count == 0 => (fill(self.t(Msg::SendPinTitle), &[&alias]), String::new()),
-            SendView::Pin { .. } => (fill(self.t(Msg::SendPinTitle), &[&alias]), format!("{files} · {first} · {}", lang::human_size(lang, send.bytes))),
+            SendView::Pin { .. } => (fill(self.t(Msg::SendPinTitle), &[&alias]), format!("{files} · {size}")),
         };
         let line = self.fonts.fit(&line, 16.0, w - 36.0);
         c.text(&mut self.fonts, &line, x + 18.0, y + 54.0, 16.0, TEXT);
         let sub = self.fonts.fit(&sub, 12.0, w - 36.0);
         c.text(&mut self.fonts, &sub, x + 18.0, y + 76.0, 12.0, TEXT2);
+        // Every file that would go, by name: the first ones, and how many more.
+        let (names, more) = send.name_lines();
+        for (i, name) in send.names.iter().take(names).enumerate() {
+            let name = self.fonts.fit(name, 12.5, w - 36.0 - 14.0);
+            let ny = y + SEND_HEAD + 7.0 + i as f32 * NAME_LINE;
+            c.circle(x + 22.0, ny, 1.6, TEXT2);
+            c.text(&mut self.fonts, &name, x + 32.0, ny, 12.5, TEXT);
+        }
+        if more > 0 {
+            let rest = Count::SendMore.text(lang, more as u64, &[]);
+            c.text(&mut self.fonts, &rest, x + 32.0, y + SEND_HEAD + 7.0 + names as f32 * NAME_LINE, 12.5, TEXT2);
+        }
 
         let body = layout.body;
         match &send.view {
@@ -962,7 +1110,7 @@ impl Ui {
                     if ry + SEND_ROW <= rows.1 || ry >= rows.1 + rows.3 {
                         continue;
                     }
-                    if send.hover == Some(SendHit::Row(i)) {
+                    if live && send.hover == Some(SendHit::Row(i)) {
                         c.rrect(rows.0, ry + 2.0, rows.2, SEND_ROW - 4.0, 14.0, HOVER);
                     }
                     c.circle(rows.0 + 30.0, ry + SEND_ROW / 2.0, 18.0, CHIP);
@@ -979,7 +1127,7 @@ impl Ui {
                         room -= lw + 8.0;
                     }
                     let name = self.fonts.fit(&device.alias, 14.0, room);
-                    c.text(&mut self.fonts, &name, rows.0 + 60.0, ry + 20.0, 14.0, TEXT);
+                    c.text(&mut self.fonts, &name, rows.0 + 60.0, ry + 20.0, 14.0, if live { TEXT } else { TEXT2 });
                     // Everything that identifies it, before anything is sent: kind, address, certificate.
                     let place = format!("{} · {}", self.t(kind_name(device.kind)), device.host);
                     let detail = if device.https { format!("{place} · {}", short_fingerprint(&device.fingerprint)) } else { format!("{place} · {}", self.t(Msg::SendPlain)) };
@@ -1002,7 +1150,7 @@ impl Ui {
                     let proof = self.t(Msg::SendUnencrypted);
                     c.text(&mut self.fonts, proof, body.0, body.1 + 36.0, 13.5, WARN);
                 }
-                let note = self.t(Msg::SendFirstTime);
+                let note = self.t(if is_known(&self.drop.known, device) { Msg::SendKnownNote } else { Msg::SendFirstTime });
                 for (i, text) in wrap(&mut self.fonts, note, 12.0, body.2, 3).iter().enumerate() {
                     c.text(&mut self.fonts, text, body.0, body.1 + 66.0 + i as f32 * 18.0, 12.0, TEXT2);
                 }
@@ -1028,9 +1176,9 @@ impl Ui {
 
         let (left, right) = send.buttons();
         if let Some((hit, label)) = left {
-            self.send_button(c, layout.left, label, false, send.hover == Some(hit));
+            self.send_button(c, layout.left, label, false, send.hover == Some(hit), live);
         }
-        self.send_button(c, layout.right, right.1, right.0 == SendHit::Go, send.hover == Some(right.0));
+        self.send_button(c, layout.right, right.1, right.0 == SendHit::Go, send.hover == Some(right.0), live);
     }
 
     /// Test commands (`shabnam-shell test-send …`), for looking at and driving the picker without
@@ -1091,7 +1239,15 @@ impl Ui {
         if self.drop.send.as_ref().is_some_and(|s| !s.demo) {
             return Act::None;
         }
-        let mut send = SendUi::new("demo".into(), 3, 12_400_000, "IMG_20261120_0731.jpg".into());
+        let names = ["IMG_20261120_0731.jpg", "IMG_20261120_0732.jpg", "合同 2026-11.pdf", "报价单.xlsx", "notes.txt", "视频 01.mp4", "视频 02.mp4", "视频 03.mp4"];
+        // `demo files N` shows the list with N files (the names beyond the eighth are not sent to the shell).
+        let (which, count) = match which.split_once(' ') {
+            Some(("files", n)) => ("list", n.parse::<u32>().unwrap_or(3).clamp(1, 500)),
+            _ => (which, 3),
+        };
+        let shown = names.iter().take(count as usize).map(|n| n.to_string()).collect();
+        // Already past the quiet time: a demo is there to be looked at.
+        let mut send = SendUi::new("demo".into(), 1, count, 4_133_000 * count as u64, shown, false, Instant::now() - GUARD);
         (send.demo, send.searching) = (true, false);
         match which {
             "list" => send.devices = list,
@@ -1182,7 +1338,7 @@ mod tests {
 
     fn picker(devices: Vec<Device>) -> DropUi {
         let mut drop = DropUi::default();
-        assert!(!drop.apply(FromDaemon::SendRequest { id: "o-1".into(), count: 2, bytes: 30, name: "a.jpg".into() }));
+        assert!(!drop.apply(request(1, 2, false)));
         assert_eq!(drop.wish.take(), Some(Wish::Open));
         assert!(drop.send.as_ref().unwrap().searching, "searching until the first list arrives");
         drop.apply(FromDaemon::SendDevices { id: "o-1".into(), searching: false, list: devices });
@@ -1190,8 +1346,14 @@ mod tests {
         drop
     }
 
+    /// A send request as the daemon announces it: `count` files, from root's command or not.
+    fn request(revision: u32, count: u32, by_root: bool) -> FromDaemon {
+        let names = (0..count.min(8)).map(|i| format!("f{i}.jpg")).collect();
+        FromDaemon::SendRequest { id: "o-1".into(), revision, count, bytes: 15 * count as u64, names, by_root }
+    }
+
     fn send_to(device: &Device) -> ToDaemon {
-        ToDaemon::SendTo { id: "o-1".into(), fingerprint: device.fingerprint.clone(), host: device.host.clone(), port: device.port }
+        ToDaemon::SendTo { id: "o-1".into(), revision: 1, fingerprint: device.fingerprint.clone(), host: device.host.clone(), port: device.port }
     }
 
     #[test]
@@ -1251,7 +1413,7 @@ mod tests {
     }
 
     #[test]
-    fn a_known_device_sends_at_one_click_and_a_sent_one_becomes_known() {
+    fn only_roots_own_request_sends_to_a_known_device_at_one_click() {
         let (phone, plain) = (device("phone", true), device("plain", false));
         let mut drop = picker(vec![phone.clone(), plain.clone()]);
         drop.send_click(SendHit::Row(0));
@@ -1262,12 +1424,136 @@ mod tests {
         assert_eq!(drop.notice, Some(Notice::SendResult { to: "phone".into(), outcome: SendOutcome::Declined, sent: 0 }));
         // (Marking a device known writes the list; here it is put there directly.)
         drop.known = vec![phone.fingerprint.clone(), plain.fingerprint.clone()];
-        drop.apply(FromDaemon::SendRequest { id: "o-1".into(), count: 1, bytes: 3, name: "b".into() });
+        // A program of the desktop user asks: known or not, the device is confirmed first.
+        drop.apply(request(1, 1, false));
+        drop.apply(FromDaemon::SendDevices { id: "o-1".into(), searching: false, list: vec![phone.clone(), plain.clone()] });
+        assert_eq!(drop.send_click(SendHit::Row(0)), (None, false));
+        assert_eq!(drop.send.as_ref().unwrap().view, SendView::Confirm(phone.clone()));
+        assert_eq!(drop.send_click(SendHit::Go), (Some(send_to(&phone)), true));
+        drop.apply(FromDaemon::SendDone { id: "o-1".into(), to: "phone".into(), outcome: SendOutcome::Cancelled, sent: 0 });
+        // Root's own request: one click for the known device, still two for one that does not encrypt.
+        drop.apply(request(1, 1, true));
         drop.apply(FromDaemon::SendDevices { id: "o-1".into(), searching: false, list: vec![phone.clone(), plain.clone()] });
         assert_eq!(drop.send_click(SendHit::Row(1)), (None, false), "unencrypted: asked every time");
         assert_eq!(drop.send.as_ref().unwrap().view, SendView::Confirm(plain));
         drop.send_click(SendHit::Back);
         assert_eq!(drop.send_click(SendHit::Row(0)), (Some(send_to(&phone)), true));
+    }
+
+    #[test]
+    fn presses_are_ignored_right_after_the_picker_appears_or_changes() {
+        let start = Instant::now();
+        let mut send = SendUi::new("o-1".into(), 1, 1, 1, vec!["a".into()], false, start);
+        let (row, go) = (Some(SendHit::Row(0)), Some(SendHit::Go));
+        // A click that was already on its way when the picker came up: nothing.
+        send.press(row, start + Duration::from_millis(100));
+        assert_eq!(send.release(row, start + Duration::from_millis(180)), None);
+        // Pressed during the quiet time, held, released after it: still nothing.
+        send.press(row, start + GUARD - Duration::from_millis(1));
+        assert_eq!(send.release(row, start + GUARD + Duration::from_secs(2)), None);
+        // After it, a press and release on the same row is a click.
+        let later = start + GUARD;
+        assert!(send.quiet(later - Duration::from_millis(1)) && !send.quiet(later));
+        send.press(row, later);
+        assert_eq!(send.release(row, later + Duration::from_millis(90)), row);
+        assert_eq!(send.release(row, later + Duration::from_millis(95)), None, "one press, one click");
+        // Pressed on one thing, released on another, or on nothing: no click.
+        send.press(row, later);
+        assert_eq!(send.release(go, later), None);
+        send.press(row, later);
+        assert_eq!(send.release(None, later), None);
+        send.press(None, later);
+        assert_eq!(send.release(row, later), None);
+        send.press(row, later);
+        assert_eq!(send.release(Some(SendHit::Row(1)), later), None);
+        // The picker changes between press and release (a list arrives, files change): the
+        // press is forgotten, and the quiet time starts again.
+        send.press(row, later);
+        send.hush(later + Duration::from_millis(50));
+        assert_eq!(send.release(row, later + Duration::from_millis(60)), None);
+        send.press(go, later + Duration::from_millis(400));
+        assert_eq!(send.release(go, later + Duration::from_millis(450)), None);
+        send.press(go, later + Duration::from_millis(50) + GUARD);
+        assert_eq!(send.release(go, later + Duration::from_millis(60) + GUARD), go);
+    }
+
+    #[test]
+    fn what_changes_the_picker_starts_the_quiet_time_again() {
+        let phone = device("phone", true);
+        let mut drop = picker(vec![phone.clone()]);
+        let rest = |drop: &mut DropUi| {
+            let send = drop.send.as_mut().unwrap();
+            assert!(send.quiet(Instant::now()), "quiet again");
+            send.quiet_until = Instant::now() - Duration::from_millis(1);
+        };
+        rest(&mut drop);
+        // The same list again changes nothing; another one does.
+        drop.apply(FromDaemon::SendDevices { id: "o-1".into(), searching: true, list: vec![phone.clone()] });
+        assert!(!drop.send.as_ref().unwrap().quiet(Instant::now()));
+        drop.apply(FromDaemon::SendDevices { id: "o-1".into(), searching: false, list: vec![device("mac", true), phone.clone()] });
+        rest(&mut drop);
+        // The owner's own step to the confirmation (the send button appears), and back.
+        drop.send_click(SendHit::Row(1));
+        rest(&mut drop);
+        drop.send_click(SendHit::Back);
+        rest(&mut drop);
+        // Other files.
+        drop.apply(request(2, 3, false));
+        rest(&mut drop);
+        // The device asks for a PIN.
+        drop.send_click(SendHit::Row(1));
+        drop.send.as_mut().unwrap().revision = 2;
+        drop.send_click(SendHit::Go);
+        drop.apply(FromDaemon::SendPinWanted { id: "o-1".into(), wrong: false });
+        rest(&mut drop);
+    }
+
+    #[test]
+    fn the_choice_is_for_the_files_that_were_shown() {
+        let phone = device("phone", true);
+        let mut drop = picker(vec![phone.clone()]);
+        assert_eq!(drop.touch(), Some(ToDaemon::SendTouch { id: "o-1".into() }), "the first click tells the daemon to close the set");
+        assert_eq!(drop.touch(), None);
+        drop.send_click(SendHit::Row(0));
+        // The files change while the owner is at the confirmation: back to the list, nothing chosen.
+        drop.wish = None;
+        drop.apply(request(2, 3, false));
+        let send = drop.send.as_ref().unwrap();
+        assert_eq!((&send.view, send.revision, send.count, send.names.len()), (&SendView::List, 2, 3, 3));
+        assert_eq!(drop.send_click(SendHit::Go), (None, false));
+        // The choice names the revision that is on the screen.
+        drop.send_click(SendHit::Row(0));
+        let sent = drop.send_click(SendHit::Go);
+        assert_eq!(sent, (Some(ToDaemon::SendTo { id: "o-1".into(), revision: 2, fingerprint: phone.fingerprint.clone(), host: phone.host.clone(), port: phone.port }), true));
+        assert!(drop.send.as_ref().unwrap().committed);
+        // The daemon did not take it (the set had changed once more) and announces the request
+        // again: the picker comes back, undecided, and closing it withdraws the request.
+        drop.wish = None;
+        drop.apply(request(3, 4, false));
+        let send = drop.send.as_ref().unwrap();
+        assert_eq!((drop.wish, &send.view, send.committed, send.target.clone(), send.revision), (Some(Wish::Open), &SendView::List, false, None, 3));
+        assert_eq!(drop.send_closed(), Some(ToDaemon::SendCancel { id: "o-1".into() }));
+        // The same when it comes back with the number the shell already had.
+        let mut drop = picker(vec![phone.clone()]);
+        drop.send_click(SendHit::Row(0));
+        drop.send_click(SendHit::Go);
+        drop.wish = None;
+        drop.apply(request(1, 2, false));
+        assert_eq!((drop.wish, drop.send.as_ref().unwrap().committed), (Some(Wish::Open), false));
+    }
+
+    #[test]
+    fn every_file_is_named_or_counted() {
+        let lines = |count: u32| {
+            let names = (0..count.min(8)).map(|i| i.to_string()).collect();
+            SendUi::new("o-1".into(), 1, count, 1, names, false, Instant::now()).name_lines()
+        };
+        assert_eq!(lines(1), (1, 0));
+        assert_eq!(lines(NAME_LINES as u32), (NAME_LINES, 0));
+        assert_eq!(lines(NAME_LINES as u32 + 1), (NAME_LINES - 1, 2));
+        assert_eq!(lines(500), (NAME_LINES - 1, 500 - (NAME_LINES as u32 - 1)));
+        // Fewer names than the count says (a daemon that sends too few): the rest is counted.
+        assert_eq!(SendUi::new("o-1".into(), 1, 4, 1, vec!["a".into()], false, Instant::now()).name_lines(), (1, 3));
     }
 
     #[test]
@@ -1282,10 +1568,10 @@ mod tests {
         drop.apply(FromDaemon::SendDevices { id: "o-1".into(), searching: false, list: vec![] });
         assert_eq!(drop.send.as_ref().unwrap().view, SendView::List);
         assert_eq!(drop.send_click(SendHit::Go), (None, false));
-        // More files for the same picker: the heading changes, the picker is not opened again.
+        // The same request announced again, unchanged: nothing starts over.
         drop.wish = None;
-        drop.apply(FromDaemon::SendRequest { id: "o-1".into(), count: 5, bytes: 99, name: "a.jpg".into() });
-        assert_eq!((drop.wish.take(), drop.send.as_ref().unwrap().count), (Some(Wish::Redraw), 5));
+        drop.apply(request(1, 2, false));
+        assert_eq!((drop.wish.take(), drop.send.as_ref().unwrap().count), (Some(Wish::Redraw), 2));
         // Searching again is asked for once.
         assert_eq!(drop.send_click(SendHit::Refresh), (Some(ToDaemon::SendRefresh { id: "o-1".into() }), false));
         assert_eq!(drop.send_click(SendHit::Refresh), (None, false));
@@ -1359,7 +1645,7 @@ mod tests {
     #[test]
     fn a_demo_picker_sends_nothing() {
         let mut drop = DropUi::default();
-        let mut send = SendUi::new("demo".into(), 1, 1, "x".into());
+        let mut send = SendUi::new("demo".into(), 1, 1, 1, vec!["x".into()], false, Instant::now());
         (send.demo, send.devices) = (true, vec![device("phone", true)]);
         drop.send = Some(send);
         assert_eq!(drop.send_click(SendHit::Row(0)), (None, true));

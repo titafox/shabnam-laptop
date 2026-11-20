@@ -23,7 +23,7 @@
 //!   shabnam-shell test-menu APPID           the context menu of that app's shelf icon
 //!   shabnam-shell test-launcher-menu APPID  the launcher with the context menu of that app's entry
 //!   shabnam-shell test-drop offer|progress|done|text|refused   the 隔空传送 card with made-up content
-//!   shabnam-shell test-send demo list|searching|empty|nowifi|confirm|plain|pin|waiting|progress|sent|declined|failed
+//!   shabnam-shell test-send demo list|files N|searching|empty|nowifi|confirm|plain|pin|waiting|progress|sent|declined|failed
 //!                                           the 隔空传送 send picker / card with made-up content
 //!   shabnam-shell test-send row N|send|back|refresh|cancel|type TEXT|stop
 //!                                           in the picker that is really up: what a click on the
@@ -217,6 +217,8 @@ struct Shell {
     /// The volume / brightness indicator while it is up, and when it is due to go.
     osd: Option<Surf>,
     osd_until: Instant,
+    /// A timer is set for the end of the send picker's quiet time.
+    quiet_timer: bool,
     /// Where the threads that read the volume or brightness hand in what they found.
     osd_values: channel::Sender<(OsdKind, u32)>,
     /// The 隔空传送 card while there is something to show.
@@ -266,6 +268,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         panel: None,
         osd: None,
         osd_until: Instant::now(),
+        quiet_timer: false,
         osd_values,
         notice: None,
         int_scale: 1,
@@ -453,6 +456,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         if shell.ui.dirty_panel {
             shell.draw(Where::Panel);
+        }
+        // The send picker is drawn dimmed while it ignores presses: once more when that is over.
+        if !shell.quiet_timer {
+            if let Some(left) = shell.ui.send_quiet_left() {
+                let timer = Timer::from_duration(left + Duration::from_millis(20));
+                shell.quiet_timer = event_loop
+                    .handle()
+                    .insert_source(timer, |_, _, shell| {
+                        shell.quiet_timer = false;
+                        shell.ui.dirty_panel = shell.panel.is_some();
+                        TimeoutAction::Drop
+                    })
+                    .is_ok();
+            }
         }
         if shell.ui.dirty_osd {
             shell.draw(Where::Osd);
@@ -922,7 +939,10 @@ impl PointerHandler for Shell {
                     let act = self.ui.press(place, x, y, button);
                     self.act(act);
                 }
-                PointerEventKind::Release { .. } => self.ui.release(x),
+                PointerEventKind::Release { .. } => {
+                    let act = self.ui.release(place, x, y);
+                    self.act(act);
+                }
                 PointerEventKind::Axis { vertical, .. } => {
                     let steps = if vertical.discrete != 0 { vertical.discrete as f64 } else { vertical.absolute / 15.0 };
                     self.ui.scroll(place, steps as f32);

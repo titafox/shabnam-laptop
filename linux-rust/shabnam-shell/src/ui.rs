@@ -1717,9 +1717,11 @@ impl Ui {
             (Where::Panel, Some(Panel::Send)) => {
                 if !self.send_inside(x, y) {
                     Act::Close
-                } else if button == BTN_LEFT {
-                    self.send_press(x, y)
                 } else {
+                    // Only noted: it is the release, on the same thing, that acts.
+                    if button == BTN_LEFT {
+                        self.send_press(x, y);
+                    }
                     Act::None
                 }
             }
@@ -1760,10 +1762,14 @@ impl Ui {
         }
     }
 
-    pub fn release(&mut self, x: f32) {
+    pub fn release(&mut self, place: Where, x: f32, y: f32) -> Act {
         if let Some(slider) = self.drag.take() {
             self.drag_to(slider, x, true);
         }
+        if place == Where::Panel && self.open == Some(Panel::Send) {
+            return self.send_release(x, y);
+        }
+        Act::None
     }
 
     /// `steps` is in wheel notches, positive downwards.

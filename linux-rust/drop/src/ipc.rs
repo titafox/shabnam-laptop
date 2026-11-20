@@ -52,6 +52,8 @@ pub fn wake_path() -> String {
 /// No line is longer than this; a peer that sends more is disconnected.
 pub const MAX_LINE: usize = 8192;
 const MAX_NAME: usize = 120;
+/// How many file names of a send request are passed to the picker (the rest is a number).
+pub const SHOWN_NAMES: usize = 8;
 const MAX_TEXT: usize = 600;
 const MAX_ID: usize = 64;
 const MAX_DEVICES: usize = 32;
@@ -221,8 +223,12 @@ pub enum ToDaemon {
     /// exits once it has nothing left to send.
     Receive(bool),
     /// The owner chose, in the shell's picker, where the files of send request `id` go: one of
-    /// the devices the daemon listed for that request, named by all of what was shown.
-    SendTo { id: String, fingerprint: String, host: String, port: u16 },
+    /// the devices the daemon listed for that request, named by all of what was shown —
+    /// and `revision` says which set of files the owner was looking at when choosing. The daemon
+    /// takes the choice only if that is still the set.
+    SendTo { id: String, revision: u32, fingerprint: String, host: String, port: u16 },
+    /// The owner has started to use the picker of request `id`: from now on nothing is added to it.
+    SendTouch { id: String },
     /// The PIN the owner typed for the device that asked for one.
     SendPin { id: String, pin: String },
     /// Search the network again for the picker of request `id`.
@@ -250,9 +256,12 @@ pub enum FromDaemon {
     /// A text message (nothing is saved).
     Text { from: String, text: String },
     Devices(Vec<Device>),
-    /// A program of the desktop user handed over files to send: show the picker. Sent again
-    /// (same id) when more files were added to the request while the picker is up.
-    SendRequest { id: String, count: u32, bytes: u64, name: String },
+    /// A program handed over files to send: show the picker. Sent again (same id, another
+    /// `revision`) whenever the set of files changed, and when a choice was refused because it
+    /// was made for an older set: the picker then starts over. `names` are the first
+    /// `SHOWN_NAMES` of the `count` files; `by_root` says that all of them came from root's own
+    /// command rather than from a program of the desktop user.
+    SendRequest { id: String, revision: u32, count: u32, bytes: u64, names: Vec<String>, by_root: bool },
     /// The devices to choose from for request `id`, while its picker is up.
     SendDevices { id: String, searching: bool, list: Vec<Device> },
     /// The chosen device wants a PIN (`wrong`: the one given was not right).
@@ -302,7 +311,8 @@ impl ToDaemon {
             ToDaemon::Devices => json!({"t": "devices"}),
             ToDaemon::Quit => json!({"t": "quit"}),
             ToDaemon::Receive(on) => json!({"t": "receive", "on": on}),
-            ToDaemon::SendTo { id, fingerprint, host, port } => json!({"t": "send-to", "id": id, "fp": fingerprint, "host": host, "port": port}),
+            ToDaemon::SendTo { id, revision, fingerprint, host, port } => json!({"t": "send-to", "id": id, "rev": revision, "fp": fingerprint, "host": host, "port": port}),
+            ToDaemon::SendTouch { id } => json!({"t": "send-touch", "id": id}),
             ToDaemon::SendPin { id, pin } => json!({"t": "send-pin", "id": id, "pin": pin}),
             ToDaemon::SendRefresh { id } => json!({"t": "send-refresh", "id": id}),
             ToDaemon::SendCancel { id } => json!({"t": "send-cancel", "id": id}),
@@ -325,12 +335,14 @@ pub fn parse_to_daemon(line: &str) -> Option<ToDaemon> {
             (plain(fingerprint, "") && plain(host, ".:%")).then_some(())?;
             ToDaemon::SendTo {
                 id: id_of(&value)?,
+                revision: u32::try_from(number(&value, "rev")?).ok()?,
                 fingerprint: fingerprint.to_string(),
                 host: host.to_string(),
                 port: u16::try_from(number(&value, "port")?).ok().filter(|p| *p != 0)?,
             }
         }
         "send-pin" => ToDaemon::SendPin { id: id_of(&value)?, pin: pin_of(&value)? },
+        "send-touch" => ToDaemon::SendTouch { id: id_of(&value)? },
         "send-refresh" => ToDaemon::SendRefresh { id: id_of(&value)? },
         "send-cancel" => ToDaemon::SendCancel { id: id_of(&value)? },
         _ => return None,
@@ -360,7 +372,7 @@ impl FromDaemon {
             FromDaemon::Refused { from, why } => json!({"t": "refused", "from": from, "why": why.word()}),
             FromDaemon::Text { from, text } => json!({"t": "text", "from": from, "text": text}),
             FromDaemon::Devices(list) => json!({"t": "devices", "list": list.iter().take(MAX_DEVICES).map(Device::to_json).collect::<Vec<_>>()}),
-            FromDaemon::SendRequest { id, count, bytes, name } => json!({"t": "send-request", "id": id, "count": count, "bytes": bytes, "name": name}),
+            FromDaemon::SendRequest { id, revision, count, bytes, names, by_root } => json!({"t": "send-request", "id": id, "rev": revision, "count": count, "bytes": bytes, "names": names, "root": by_root}),
             FromDaemon::SendDevices { id, searching, list } => {
                 json!({"t": "send-devices", "id": id, "searching": searching, "list": list.iter().take(MAX_DEVICES).map(Device::to_json).collect::<Vec<_>>()})
             }
@@ -403,7 +415,14 @@ pub fn parse_from_daemon(line: &str) -> Option<FromDaemon> {
         "refused" => FromDaemon::Refused { from: text_of(&value, "from", MAX_NAME)?, why: Refusal::from_word(value.get("why")?.as_str()?)? },
         "text" => FromDaemon::Text { from: text_of(&value, "from", MAX_NAME)?, text: text_of(&value, "text", MAX_TEXT)? },
         "devices" => FromDaemon::Devices(devices_of(&value)?),
-        "send-request" => FromDaemon::SendRequest { id: id_of(&value)?, count: count("count")?, bytes: number(&value, "bytes")?, name: text_of(&value, "name", MAX_NAME)? },
+        "send-request" => FromDaemon::SendRequest {
+            id: id_of(&value)?,
+            revision: count("rev")?,
+            count: count("count")?,
+            bytes: number(&value, "bytes")?,
+            names: value.get("names")?.as_array()?.iter().take(SHOWN_NAMES).map(|n| n.as_str().map(|n| tidy(n, MAX_NAME))).collect::<Option<Vec<_>>>()?,
+            by_root: value.get("root")?.as_bool()?,
+        },
         "send-devices" => FromDaemon::SendDevices { id: id_of(&value)?, searching: value.get("searching")?.as_bool()?, list: devices_of(&value)? },
         "send-pin-wanted" => FromDaemon::SendPinWanted { id: id_of(&value)?, wrong: value.get("wrong")?.as_bool()? },
         "send-progress" => FromDaemon::SendProgress {
@@ -602,7 +621,8 @@ mod tests {
             ToDaemon::Devices,
             ToDaemon::Quit,
             ToDaemon::Receive(true),
-            ToDaemon::SendTo { id: "o-1".into(), fingerprint: "AB12".into(), host: "192.0.2.5".into(), port: 53317 },
+            ToDaemon::SendTo { id: "o-1".into(), revision: 3, fingerprint: "AB12".into(), host: "192.0.2.5".into(), port: 53317 },
+            ToDaemon::SendTouch { id: "o-1".into() },
             ToDaemon::SendPin { id: "o-1".into(), pin: "123456".into() },
             ToDaemon::SendRefresh { id: "o-1".into() },
             ToDaemon::SendCancel { id: "o-1".into() },
@@ -622,7 +642,7 @@ mod tests {
             FromDaemon::Refused { from: "x".into(), why: Refusal::NoSpace },
             FromDaemon::Text { from: "Phone".into(), text: "你好 \"quoted\"".into() },
             FromDaemon::Devices(vec![phone()]),
-            FromDaemon::SendRequest { id: "o-1".into(), count: 2, bytes: 3_000_000, name: "照片 1.jpg".into() },
+            FromDaemon::SendRequest { id: "o-1".into(), revision: 2, count: 2, bytes: 3_000_000, names: vec!["照片 1.jpg".into(), "b.pdf".into()], by_root: false },
             FromDaemon::SendDevices { id: "o-1".into(), searching: true, list: vec![phone(), Device { https: false, kind: DeviceKind::Other, ..phone() }] },
             FromDaemon::SendPinWanted { id: "o-1".into(), wrong: true },
             FromDaemon::SendProgress { id: "o-1".into(), to: "iPhone".into(), file: 1, count: 2, done: 5, total: 10 },

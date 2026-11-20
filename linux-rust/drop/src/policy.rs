@@ -3,6 +3,9 @@
 
 use crate::ipc::{Refusal, SubmitRefusal};
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 /// Most files in one transfer.
 pub const MAX_FILES: usize = 500;
@@ -55,9 +58,72 @@ pub fn check_send(files: usize, bytes: u64) -> Result<(), SubmitRefusal> {
 pub const SEND_WAIT_SECONDS: u64 = 300;
 /// How long a daemon that is only there for sending stays when nobody asks it for anything.
 pub const SEND_IDLE_SECONDS: u64 = 20;
-/// Most programs that may be handing over files at the same time (the file manager starts one
-/// per selected file).
-pub const MAX_SUBMITTERS: usize = 64;
+/// Most programs that may be connected to hand over files at the same time. The file manager
+/// starts one per selected file and each stays until its request is over, so this is also the
+/// largest selection that can be sent from there in one go.
+pub const MAX_SUBMITTERS: usize = 32;
+/// More files join a request that is already on the screen only this soon after it appeared —
+/// long enough for the file manager's one-sender-per-file burst (measured on the laptop: 32
+/// senders started in a row are all queued within 0.11 s, 0.25 s when the daemon has to be
+/// started first), too short for the owner to have read the picker and be about to click —
+/// and never once the owner has used the picker.
+pub const MERGE_WINDOW: Duration = Duration::from_millis(1000);
+/// After a request was given up without anything being sent (cancelled, nobody chose), programs
+/// of the desktop user wait this long before the next one is taken: the picker cannot be made
+/// to appear more often than that.
+pub const SEND_COOLDOWN: Duration = Duration::from_secs(5);
+/// A requester has this long, in all, to hand over its files and say "go".
+pub const HANDOVER: Duration = Duration::from_secs(10);
+
+/// What is left of the hand-over time after `spent`: the longest the next read may wait.
+/// None: the time is up and the requester is dropped.
+pub fn handover_left(spent: Duration) -> Option<Duration> {
+    HANDOVER.checked_sub(spent).filter(|left| !left.is_zero())
+}
+
+/// Descriptors received from requesters and still open, all connections and the request itself
+/// together: one request's worth of files and a little more for those still handing over.
+pub const FD_BUDGET: usize = MAX_FILES + 100;
+/// Descriptors the daemon needs besides: its sockets, the requesters' connections (two each),
+/// the files and connections of a transfer that is being received, the runtime's own.
+pub const FD_HEADROOM: usize = 2 * MAX_SUBMITTERS + 192;
+/// The descriptor limit the daemon asks for when it has less.
+pub const NOFILE_WANTED: u64 = (FD_BUDGET + FD_HEADROOM) as u64 + 168;
+
+/// The budget that fits under the process's descriptor limit.
+pub fn fd_budget(nofile: u64) -> usize {
+    FD_BUDGET.min((nofile.min(1 << 20) as usize).saturating_sub(FD_HEADROOM))
+}
+
+/// Counts the descriptors received from requesters. A place is taken before a descriptor is
+/// received and given back when the `Slot` is dropped — with the file it stands for.
+pub struct Budget {
+    used: AtomicUsize,
+    most: usize,
+}
+
+pub struct Slot(Arc<Budget>);
+
+impl Budget {
+    pub fn new(most: usize) -> Arc<Budget> {
+        Arc::new(Budget { used: AtomicUsize::new(0), most })
+    }
+
+    pub fn take(self: &Arc<Budget>) -> Option<Slot> {
+        self.used.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |used| (used < self.most).then_some(used + 1)).ok()?;
+        Some(Slot(self.clone()))
+    }
+
+    pub fn used(&self) -> usize {
+        self.used.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.used.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 /// Whether an offer from the network may be considered at all: only while receiving is switched
 /// on, and not while this device is itself sending. "Off" means nobody can send to us — also
@@ -227,6 +293,53 @@ mod tests {
         assert_eq!(check_size(1, 5 << 30, 5 << 30), Err(Refusal::NoSpace));
         assert_eq!(check_size(1, u64::MAX, u64::MAX), Err(Refusal::TooBig));
         assert_eq!(check_size(1, 1, RESERVE), Err(Refusal::NoSpace));
+    }
+
+    #[test]
+    fn descriptors_are_counted_across_all_requesters() {
+        let budget = Budget::new(3);
+        let (a, b) = (budget.take().unwrap(), budget.take().unwrap());
+        let c = budget.take().unwrap();
+        assert!(budget.take().is_none(), "full: whoever asks next gets nothing");
+        assert_eq!(budget.used(), 3);
+        drop(b);
+        assert_eq!(budget.used(), 2);
+        let d = budget.take().unwrap();
+        assert!(budget.take().is_none());
+        drop((a, c, d));
+        assert_eq!(budget.used(), 0);
+        // From many threads at once it never goes over.
+        let budget = Budget::new(50);
+        let threads: Vec<_> = (0..8).map(|_| { let budget = budget.clone(); std::thread::spawn(move || (0..40).filter_map(|_| budget.take()).collect::<Vec<_>>()) }).collect();
+        let held: Vec<Vec<Slot>> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+        assert_eq!((held.iter().map(Vec::len).sum::<usize>(), budget.used()), (50, 50));
+        drop(held);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn the_budget_fits_under_the_descriptor_limit() {
+        assert!(FD_BUDGET >= MAX_FILES, "one full request must fit");
+        assert!((FD_BUDGET + FD_HEADROOM) as u64 <= NOFILE_WANTED && NOFILE_WANTED <= 1024);
+        assert_eq!(fd_budget(1024), FD_BUDGET);
+        assert_eq!(fd_budget(u64::MAX), FD_BUDGET);
+        assert_eq!(fd_budget(512), 512 - FD_HEADROOM);
+        assert_eq!(fd_budget(64), 0, "too few to take any: every hand-over is refused");
+    }
+
+    #[test]
+    fn a_requester_that_stalls_runs_out_of_time() {
+        assert_eq!(handover_left(Duration::ZERO), Some(HANDOVER));
+        assert_eq!(handover_left(Duration::from_secs(4)), Some(HANDOVER - Duration::from_secs(4)));
+        assert_eq!(handover_left(HANDOVER), None);
+        assert_eq!(handover_left(HANDOVER + Duration::from_secs(60)), None);
+        // However it spreads its messages, the waits it is given add up to no more than the whole.
+        let (mut spent, mut reads) = (Duration::ZERO, 0);
+        while let Some(left) = handover_left(spent) {
+            spent += left.min(Duration::from_secs(3));
+            reads += 1;
+        }
+        assert_eq!((spent, reads), (HANDOVER, 4));
     }
 
     #[test]

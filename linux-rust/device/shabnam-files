@@ -3,7 +3,7 @@
 #
 # The program behind it is Favnyr (github.com/GlitchAwakened/Favnyr, Rust + Slint, GPL-3.0-or-later),
 # built by ../files/build.sh and installed as /usr/local/bin/favnyr. This wrapper only chooses how it draws
-# and its first-run language, so the launcher entry and shabnam-player keep working if the program changes.
+# and its language, so the launcher entry and shabnam-player keep working if the program changes.
 #
 # Drawing: Slint's CPU renderer (wl_shm buffers, the same route as shabnam-shell and foot). It needs nothing
 # from the Mali driver; on the laptop the window is up in under a second and uses about 50 MB. The GLES
@@ -13,11 +13,26 @@
 # (../device/etc/xdg-mimeapps.list) and the .desktop files' MimeType lines; nothing is hard-coded here.
 umask 022
 export SLINT_BACKEND="${SHABNAM_FILES_BACKEND:-winit-software}"
-# First run only: Favnyr's own default language is English and it does not read LANG.
+# Language: Favnyr has its own setting (language = "zh" | "ru" | "en" | de es fr it ja in config.toml, changed
+# in its Settings) and reads neither LANG nor a command-line option. So on every start the system language
+# (LANG, exported by session.sh from /etc/shabnam/locale) is written into that one line; every other line of
+# the file — window size, columns, shortcuts — stays as it is. The file is replaced by a finished copy.
 cfg=${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/favnyr/config.toml
-if [ ! -e "$cfg" ]; then
-  case ${LC_ALL:-${LC_MESSAGES:-$LANG}} in
-    zh*) mkdir -p "${cfg%/*}" && echo 'language = "zh"' > "$cfg" ;;
-  esac
+case ${LC_ALL:-${LC_MESSAGES:-$LANG}} in
+  zh*) lang=zh ;; ru*) lang=ru ;; en*) lang=en ;; *) lang= ;;
+esac
+if [ -n "$lang" ]; then
+  line="language = \"$lang\""
+  if [ ! -e "$cfg" ]; then
+    mkdir -p "${cfg%/*}" && echo "$line" > "$cfg"
+  elif [ -f "$cfg" ] && [ ! -L "$cfg" ] && ! grep -qxF "$line" "$cfg"; then
+    # The key belongs to the part before the first [table]: replace it there, or add it there.
+    # (cp -p first: the copy keeps the file's owner and mode, awk then only fills it.)
+    cp -p "$cfg" "$cfg.new" && awk -v line="$line" '
+      /^\[/ { if (!done) { print line; done = 1 } tables = 1 }
+      !tables && /^language[ \t]*=/ { if (!done) { print line; done = 1 } next }
+      { print }
+      END { if (!done) print line }' "$cfg" > "$cfg.new" && [ -s "$cfg.new" ] && mv "$cfg.new" "$cfg" || rm -f "$cfg.new"
+  fi
 fi
 exec favnyr "$@"

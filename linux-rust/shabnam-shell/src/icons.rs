@@ -81,6 +81,12 @@ impl Icons {
         plain_name(name) && self.index.contains_key(name)
     }
 
+    /// Forgets the finished tiles: a tile without a picture shows the first letter of the
+    /// app's name, and names change with the language.
+    pub fn forget(&mut self) {
+        self.tiles.clear();
+    }
+
     /// The tile for an app, `px` buffer pixels across. `key` identifies the app in the cache,
     /// `label` supplies the fallback letter. `icon` is an icon name; it may be the path of a
     /// picture file only when `from_desktop_file` says it is the Icon= value of an installed

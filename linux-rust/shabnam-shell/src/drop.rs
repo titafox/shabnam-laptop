@@ -18,9 +18,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-/// The user the receiver runs as (see device/shabnam-drop).
-const USER: &str = "shabnam";
-
 pub enum Request {
     /// Is a receiver already running (the shell was restarted)? Connect if so.
     Probe,
@@ -35,13 +32,6 @@ pub enum Event {
     /// Receiving ended, or could not be started (`failed`).
     Off { failed: bool },
     Message(FromDaemon),
-}
-
-fn socket_path() -> String {
-    let name = std::ffi::CString::new(USER).unwrap();
-    let entry = unsafe { libc::getpwnam(name.as_ptr()) };
-    let uid = if entry.is_null() { 700 } else { unsafe { (*entry).pw_uid } };
-    format!("/run/user/{uid}/{}", ipc::SOCKET_NAME)
 }
 
 struct Worker<F: Fn(Event) + Send + Clone + 'static> {
@@ -60,7 +50,24 @@ impl<F: Fn(Event) + Send + Clone + 'static> Worker<F> {
             return true;
         }
         self.stream = None;
-        let Ok(stream) = UnixStream::connect(socket_path()) else { return false };
+        // The receiver has a user of its own (ipc::DAEMON_USER) and its socket lives in a directory
+        // only that user and root can write. Still: nothing is believed unless the kernel says the
+        // process behind the socket is that user — never the browser's user, never a stand-in.
+        let user = std::ffi::CString::new(ipc::DAEMON_USER).unwrap();
+        let entry = unsafe { libc::getpwnam(user.as_ptr()) };
+        if entry.is_null() {
+            return false;
+        }
+        let daemon_uid = unsafe { (*entry).pw_uid };
+        let Ok(stream) = UnixStream::connect(ipc::socket_path()) else { return false };
+        let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        let got = unsafe {
+            libc::getsockopt(std::os::fd::AsRawFd::as_raw_fd(&stream), libc::SOL_SOCKET, libc::SO_PEERCRED, &mut cred as *mut libc::ucred as *mut libc::c_void, &mut len)
+        };
+        if got != 0 || len as usize != std::mem::size_of::<libc::ucred>() || daemon_uid == 0 || cred.uid != daemon_uid {
+            return false;
+        }
         let Ok(mut reader) = stream.try_clone() else { return false };
         let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
         let mine = self.generation.fetch_add(1, Ordering::SeqCst) + 1;

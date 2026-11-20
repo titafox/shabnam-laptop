@@ -7,11 +7,17 @@ export LIBSEAT_BACKEND=noop RUST_BACKTRACE=1
 export XDG_RUNTIME_DIR=/run/user0 HOME=/root PATH=/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin
 # The system language: one word in /etc/shabnam/locale (zh, ru or en), written by the language
 # switch in quick settings. Everything started from here inherits it. Chinese if nothing is set.
-case "$(cat /etc/shabnam/locale 2>/dev/null)" in
-  ru) export LANG=ru_RU.UTF-8 ;;
-  en) export LANG=en_US.UTF-8 ;;
-  *)  export LANG=zh_CN.UTF-8 ;;
-esac
+# Read again each time the desktop is started (see the loop below): the switch's "restart the
+# desktop" button ends niri with /run/mode still "desktop", and the desktop that comes back —
+# with every program started in it — must be in the language just chosen.
+set_language() {
+  case "$(cat /etc/shabnam/locale 2>/dev/null)" in
+    ru) export LANG=ru_RU.UTF-8 ;;
+    en) export LANG=en_US.UTF-8 ;;
+    *)  export LANG=zh_CN.UTF-8 ;;
+  esac
+}
+set_language
 # Everything the session creates (sockets above all) is for root only unless opened on purpose:
 # the browser runs as the unprivileged user "shabnam" and can look into /run/user0.
 umask 022
@@ -71,6 +77,7 @@ echo desktop > /run/mode
 fails=0
 while true; do
   start=$(date +%s)
+  set_language
   light
   if [ "$(cat /run/mode)" = mac ]; then
     end_splash

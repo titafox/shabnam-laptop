@@ -1,12 +1,13 @@
 //! 隔空传送 in the shell: the switch in the quick panel, and the notice card above the shelf's
 //! right end that asks before a transfer is accepted and tells when files have arrived.
 //! The receiver itself is another program (see drop.rs); this file only shows what it reports
-//! and sends back the owner's clicks.
+//! and sends back the owner's clicks. Its texts are in lang.rs with all the others.
 
 use super::{inside, QuickHit, QuickLayout, Rect, Ui, ACCENT, CHIP, HOVER, ON_ACCENT, PANEL, TEXT, TEXT2, WARN};
 use crate::draw::{argb, Canvas};
 use crate::drop::ipc::{FromDaemon, Refusal, ToDaemon};
 use crate::drop::{Event, Request};
+use crate::lang::{self, fill, Count, Msg};
 use crate::sys;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -15,105 +16,6 @@ use std::time::{Duration, Instant};
 const DOWNLOADS: &str = "/home/shabnam/Downloads";
 /// Logical size of the notice card's surface.
 pub const NOTICE_SIZE: (u32, u32) = (372, 132);
-
-// ---------- every text of this feature, in the system's three languages ----------
-
-#[derive(Clone, Copy)]
-enum T {
-    Title,
-    TileOff,
-    TileStarting,
-    TileNoWifi,
-    TileOn,
-    QuickTitle,
-    QuickOff,
-    QuickOn,
-    OfferOne,
-    OfferMany,
-    AndMore,
-    Accept,
-    Decline,
-    Receiving,
-    ReceivingPlain,
-    Cancel,
-    ReceivedOne,
-    ReceivedMany,
-    SomeFailed,
-    NothingSaved,
-    ShowInFolder,
-    Close,
-    Refused,
-    WhyTooBig,
-    WhyNoSpace,
-    WhyTooMany,
-    MessageFrom,
-    StartFailed,
-    StartFailedWhy,
-    From,
-}
-
-/// (中文, русский, English). `{}` stands for a name or a number, filled in by `fill`.
-fn tri(key: T) -> (&'static str, &'static str, &'static str) {
-    match key {
-        T::Title => ("隔空传送", "Передача файлов", "Nearby share"),
-        T::TileOff => ("已关闭 · 点按开启接收", "Выключено · нажмите, чтобы принимать", "Off · click to receive"),
-        T::TileStarting => ("正在开启…", "Включение…", "Starting…"),
-        T::TileNoWifi => ("等待 Wi-Fi…", "Ожидание Wi-Fi…", "Waiting for Wi-Fi…"),
-        T::TileOn => ("接收中 · 本机名「{}」", "Приём · имя «{}»", "Receiving · as “{}”"),
-        T::QuickTitle => ("快速接收", "Быстрый приём", "Quick receive"),
-        T::QuickOff => ("已关闭 · 每次询问", "Выкл. · спрашивать", "Off · always ask"),
-        T::QuickOn => ("已开启 · 不再询问", "Вкл. · без вопросов", "On · no asking"),
-        T::OfferOne => ("「{}」想发送 1 个文件", "«{}» хочет отправить 1 файл", "“{}” wants to send 1 file"),
-        T::OfferMany => ("「{}」想发送 {} 个文件", "«{}» хочет отправить файлы: {}", "“{}” wants to send {} files"),
-        T::AndMore => ("等", "и другие", "and more"),
-        T::Accept => ("接受", "Принять", "Accept"),
-        T::Decline => ("拒绝", "Отклонить", "Decline"),
-        T::Receiving => ("正在接收「{}」的文件", "Приём файлов от «{}»", "Receiving from “{}”"),
-        T::ReceivingPlain => ("正在接收文件", "Приём файлов", "Receiving files"),
-        T::Cancel => ("取消", "Отмена", "Cancel"),
-        T::ReceivedOne => ("已收到 1 个文件", "Получен 1 файл", "1 file received"),
-        T::ReceivedMany => ("已收到 {} 个文件", "Получено файлов: {}", "{} files received"),
-        T::SomeFailed => ("{} 个未完成", "не получено: {}", "{} not completed"),
-        T::NothingSaved => ("传送未完成", "Передача не завершена", "The transfer did not complete"),
-        T::ShowInFolder => ("在文件夹中显示", "Показать в папке", "Show in folder"),
-        T::Close => ("知道了", "Понятно", "OK"),
-        T::Refused => ("已拒绝「{}」的传送", "Передача от «{}» отклонена", "Declined the transfer from “{}”"),
-        T::WhyTooBig => ("超过单次 8 GB 的上限", "Больше 8 ГБ за один раз", "More than 8 GB at once"),
-        T::WhyNoSpace => ("磁盘空间不足", "Недостаточно места на диске", "Not enough disk space"),
-        T::WhyTooMany => ("文件数量超过上限（500 个）", "Больше 500 файлов", "More than 500 files"),
-        T::MessageFrom => ("「{}」发来消息", "Сообщение от «{}»", "Message from “{}”"),
-        T::StartFailed => ("无法开启隔空传送", "Не удалось включить приём", "Could not start receiving"),
-        T::StartFailedWhy => ("接收程序没有启动", "Программа приёма не запустилась", "The receiver did not start"),
-        T::From => ("来自「{}」", "от «{}»", "from “{}”"),
-    }
-}
-
-/// Puts `values` into the `{}` places of a text, in order.
-fn fill(template: &str, values: &[&str]) -> String {
-    let mut out = String::new();
-    let mut parts = template.split("{}");
-    out.push_str(parts.next().unwrap_or(""));
-    for (i, part) in parts.enumerate() {
-        out.push_str(values.get(i).copied().unwrap_or(""));
-        out.push_str(part);
-    }
-    out
-}
-
-/// "12.4 MB"
-pub fn human_size(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
-    if bytes < 1000 {
-        return format!("{bytes} B");
-    }
-    let mut value = bytes as f64 / 1000.0;
-    let mut unit = 0;
-    while value >= 999.95 && unit < UNITS.len() - 1 {
-        value /= 1000.0;
-        unit += 1;
-    }
-    format!("{value:.1} {}", UNITS[unit])
-}
 
 // ---------- state ----------
 
@@ -269,17 +171,6 @@ impl Ui {
         self.drop.requests = Some(requests);
     }
 
-    fn dt(&self, key: T) -> &'static str {
-        let (zh, _ru, en) = tri(key);
-        // The shell knows two states today (Chinese font present or not); the Russian column is
-        // ready for the system-wide language switch.
-        if self.zh {
-            zh
-        } else {
-            en
-        }
-    }
-
     pub fn notice_wanted(&self) -> bool {
         self.drop.notice.is_some()
     }
@@ -334,17 +225,17 @@ impl Ui {
     pub(super) fn draw_drop_row(&mut self, c: &mut Canvas, layout: &QuickLayout) {
         let lit = self.drop.on || self.drop.starting;
         let sub = if self.drop.starting {
-            self.dt(T::TileStarting).to_string()
+            self.t(Msg::DropStarting).to_string()
         } else if !self.drop.on {
-            self.dt(T::TileOff).to_string()
+            self.t(Msg::DropOff).to_string()
         } else if self.drop.address.is_none() {
-            self.dt(T::TileNoWifi).to_string()
+            self.t(Msg::DropNoWifi).to_string()
         } else {
-            fill(self.dt(T::TileOn), &[&self.drop.alias])
+            fill(self.t(Msg::DropOn), &[&self.drop.alias])
         };
         let (fill_color, ink) = if lit { (ACCENT, ON_ACCENT) } else { (CHIP, TEXT) };
         let hover = self.quick_hover == Some(QuickHit::Drop);
-        let title = self.dt(T::Title);
+        let title = self.t(Msg::DropTitle);
         self.pill(c, layout.drop, title, &sub, fill_color, ink, if lit { ON_ACCENT } else { TEXT2 }, hover && !lit);
         if hover && lit {
             let (x, y, w, h) = layout.drop;
@@ -352,7 +243,7 @@ impl Ui {
         }
         if let Some(rect) = layout.drop_quick {
             let on = self.drop.quick;
-            let (title, sub) = (self.dt(T::QuickTitle), self.dt(if on { T::QuickOn } else { T::QuickOff }));
+            let (title, sub) = (self.t(Msg::DropQuickTitle), self.t(if on { Msg::DropQuickOn } else { Msg::DropQuickOff }));
             let hover = self.quick_hover == Some(QuickHit::DropQuick);
             // Orange while on: this is the state in which nobody is asked.
             if on {
@@ -368,13 +259,13 @@ impl Ui {
         self.drop.on
     }
 
-    fn notice_buttons(&self) -> (Option<T>, Option<T>, bool) {
+    fn notice_buttons(&self) -> (Option<Msg>, Option<Msg>, bool) {
         // (main button, other button, cross)
         match &self.drop.notice {
-            Some(Notice::Offer { .. }) => (Some(T::Accept), Some(T::Decline), false),
-            Some(Notice::Progress { .. }) => (Some(T::Cancel), None, false),
-            Some(Notice::Done { saved, .. }) if *saved > 0 => (Some(T::ShowInFolder), None, true),
-            Some(_) => (Some(T::Close), None, true),
+            Some(Notice::Offer { .. }) => (Some(Msg::DropAccept), Some(Msg::DropDecline), false),
+            Some(Notice::Progress { .. }) => (Some(Msg::Cancel), None, false),
+            Some(Notice::Done { saved, .. }) if *saved > 0 => (Some(Msg::DropShowInFolder), None, true),
+            Some(_) => (Some(Msg::DropClose), None, true),
             None => (None, None, false),
         }
     }
@@ -444,42 +335,43 @@ impl Ui {
             };
             arrow(5.6, true) || arrow(10.4, false)
         });
-        let title = self.dt(T::Title);
+        let title = self.t(Msg::DropTitle);
         c.text(&mut self.fonts, title, 44.0, 24.0, 12.0, TEXT2);
+        let lang = lang::current();
 
         let (line, sub, bar) = match &notice {
             Notice::Offer { from, count, bytes, name, .. } => {
-                let line = if *count == 1 { fill(self.dt(T::OfferOne), &[from]) } else { fill(self.dt(T::OfferMany), &[from, &count.to_string()]) };
-                let sub = if *count == 1 { format!("{name} · {}", human_size(*bytes)) } else { format!("{name} {} · {}", self.dt(T::AndMore), human_size(*bytes)) };
+                let line = Count::DropOffer.text(lang, *count as u64, &[from]);
+                let first = if *count == 1 { name.clone() } else { fill(self.t(Msg::DropAndMore), &[name]) };
+                let sub = format!("{first} · {}", lang::human_size(lang, *bytes));
                 (line, sub, None)
             }
             Notice::Progress { from, done, total, .. } => {
                 let part = if *total == 0 { 1.0 } else { *done as f32 / *total as f32 };
-                let line = if from.is_empty() { self.dt(T::ReceivingPlain).to_string() } else { fill(self.dt(T::Receiving), &[from]) };
-                (line, format!("{} / {} · {}%", human_size(*done), human_size(*total), (part * 100.0) as u32), Some(part))
+                let line = if from.is_empty() { self.t(Msg::DropReceivingPlain).to_string() } else { fill(self.t(Msg::DropReceiving), &[from]) };
+                (line, format!("{} / {} · {}%", lang::human_size(lang, *done), lang::human_size(lang, *total), (part * 100.0) as u32), Some(part))
             }
             Notice::Done { from, saved, failed, name } => {
                 let line = match saved {
-                    0 => self.dt(T::NothingSaved).to_string(),
-                    1 => self.dt(T::ReceivedOne).to_string(),
-                    n => fill(self.dt(T::ReceivedMany), &[&n.to_string()]),
+                    0 => self.t(Msg::DropNothingSaved).to_string(),
+                    n => Count::DropReceived.text(lang, *n as u64, &[]),
                 };
-                let mut sub = if *saved == 0 { fill(self.dt(T::From), &[from]) } else if *saved == 1 { name.clone() } else { format!("{name} {}", self.dt(T::AndMore)) };
+                let mut sub = if *saved == 0 { fill(self.t(Msg::DropFrom), &[from]) } else if *saved == 1 { name.clone() } else { fill(self.t(Msg::DropAndMore), &[name]) };
                 if *failed > 0 && *saved > 0 {
-                    sub = format!("{sub} · {}", fill(self.dt(T::SomeFailed), &[&failed.to_string()]));
+                    sub = format!("{sub} · {}", Count::DropFailed.text(lang, *failed as u64, &[]));
                 }
                 (line, sub, None)
             }
             Notice::Refused { from, why } => {
                 let why = match why {
-                    Refusal::TooBig => T::WhyTooBig,
-                    Refusal::NoSpace => T::WhyNoSpace,
-                    Refusal::TooMany => T::WhyTooMany,
+                    Refusal::TooBig => Msg::DropWhyTooBig,
+                    Refusal::NoSpace => Msg::DropWhyNoSpace,
+                    Refusal::TooMany => Msg::DropWhyTooMany,
                 };
-                (fill(self.dt(T::Refused), &[from]), self.dt(why).to_string(), None)
+                (fill(self.t(Msg::DropRefused), &[from]), self.t(why).to_string(), None)
             }
-            Notice::Text { from, text } => (fill(self.dt(T::MessageFrom), &[from]), text.clone(), None),
-            Notice::StartFailed => (self.dt(T::StartFailed).to_string(), self.dt(T::StartFailedWhy).to_string(), None),
+            Notice::Text { from, text } => (fill(self.t(Msg::DropMessageFrom), &[from]), text.clone(), None),
+            Notice::StartFailed => (self.t(Msg::DropStartFailed).to_string(), self.t(Msg::DropStartFailedWhy).to_string(), None),
         };
         let line = self.fonts.fit(&line, 14.0, w - 36.0);
         c.text(&mut self.fonts, &line, 18.0, 52.0, 14.0, TEXT);
@@ -508,19 +400,19 @@ impl Ui {
             if hover == Some(NoticeHit::Other) {
                 c.rrect(x, y, bw, bh, 16.0, HOVER);
             }
-            let label = self.dt(label);
-            c.text_centered(&mut self.fonts, label, x + bw / 2.0, y + bh / 2.0, 13.0, bw - 12.0, TEXT);
+            let label = self.t(label);
+            self.label_centered(c, label, x + bw / 2.0, y + bh / 2.0, 13.0, bw - 12.0, TEXT);
         }
         if let Some(label) = main {
             let (x, y, bw, bh) = main_rect;
             // Only "accept" and "show" are invitations; "cancel" and "OK" are quiet.
-            let strong = matches!(label, T::Accept | T::ShowInFolder);
+            let strong = matches!(label, Msg::DropAccept | Msg::DropShowInFolder);
             c.rrect(x, y, bw, bh, 16.0, if strong { ACCENT } else { CHIP });
             if hover == Some(NoticeHit::Main) {
                 c.rrect(x, y, bw, bh, 16.0, if strong { argb(0x33FFFFFF) } else { HOVER });
             }
-            let label = self.dt(label);
-            c.text_centered(&mut self.fonts, label, x + bw / 2.0, y + bh / 2.0, 13.0, bw - 12.0, if strong { ON_ACCENT } else { TEXT });
+            let label = self.t(label);
+            self.label_centered(c, label, x + bw / 2.0, y + bh / 2.0, 13.0, bw - 12.0, if strong { ON_ACCENT } else { TEXT });
         }
     }
 
@@ -547,35 +439,6 @@ mod tests {
 
     fn offer(id: &str) -> FromDaemon {
         FromDaemon::Offer { id: id.into(), from: "Phone".into(), count: 2, bytes: 10, name: "a.jpg".into() }
-    }
-
-    #[test]
-    fn texts_exist_in_three_languages() {
-        let keys = [
-            T::Title, T::TileOff, T::TileStarting, T::TileNoWifi, T::TileOn, T::QuickTitle, T::QuickOff, T::QuickOn, T::OfferOne, T::OfferMany,
-            T::AndMore, T::Accept, T::Decline, T::Receiving, T::ReceivingPlain, T::Cancel, T::ReceivedOne, T::ReceivedMany, T::SomeFailed, T::NothingSaved,
-            T::ShowInFolder, T::Close, T::Refused, T::WhyTooBig, T::WhyNoSpace, T::WhyTooMany, T::MessageFrom, T::StartFailed, T::StartFailedWhy, T::From,
-        ];
-        for key in keys {
-            let (zh, ru, en) = tri(key);
-            assert!(!zh.is_empty() && !ru.is_empty() && !en.is_empty());
-            // The same number of places to fill in every language.
-            assert_eq!(zh.matches("{}").count(), en.matches("{}").count());
-            assert_eq!(ru.matches("{}").count(), en.matches("{}").count());
-        }
-        assert_eq!(fill("「{}」想发送 {} 个文件", &["A", "3"]), "「A」想发送 3 个文件");
-        assert_eq!(fill("no places", &["x"]), "no places");
-        assert_eq!(fill("{} and {}", &["one"]), "one and ");
-    }
-
-    #[test]
-    fn sizes() {
-        assert_eq!(human_size(0), "0 B");
-        assert_eq!(human_size(999), "999 B");
-        assert_eq!(human_size(12_400_000), "12.4 MB");
-        assert_eq!(human_size(3_000_067), "3.0 MB");
-        assert_eq!(human_size(999_999_999), "1.0 GB");
-        assert_eq!(human_size(8 << 30), "8.6 GB");
     }
 
     #[test]

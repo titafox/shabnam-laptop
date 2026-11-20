@@ -23,10 +23,11 @@ fn output_of(program: &str, args: &[&str]) -> Option<String> {
 pub struct Now {
     /// "14:32"
     pub time: String,
-    /// "11月20日 周五"
-    pub date_zh: String,
-    /// "Fri, 20 Nov"
-    pub date_en: String,
+    /// Day of the week (Sunday = 0), month (January = 0) and day of the month; lang.rs turns
+    /// them into the date line of the language on screen.
+    pub weekday: usize,
+    pub month: usize,
+    pub day: u32,
     /// Seconds left in the current minute.
     pub to_next_minute: u64,
 }
@@ -35,14 +36,12 @@ pub fn now() -> Now {
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     let t = unsafe { libc::time(std::ptr::null_mut()) };
     unsafe { libc::localtime_r(&t, &mut tm) };
-    const ZH: [&str; 7] = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-    const EN: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let (weekday, month) = (tm.tm_wday.clamp(0, 6) as usize, tm.tm_mon.clamp(0, 11) as usize);
     Now {
+        // 24-hour time in every language.
         time: format!("{:02}:{:02}", tm.tm_hour, tm.tm_min),
-        date_zh: format!("{}月{}日 {}", month + 1, tm.tm_mday, ZH[weekday]),
-        date_en: format!("{}, {} {}", EN[weekday], tm.tm_mday, MONTHS[month]),
+        weekday: tm.tm_wday.clamp(0, 6) as usize,
+        month: tm.tm_mon.clamp(0, 11) as usize,
+        day: tm.tm_mday.clamp(1, 31) as u32,
         to_next_minute: (60 - tm.tm_sec.clamp(0, 59)) as u64,
     }
 }
@@ -305,7 +304,7 @@ fn path_var() -> String {
     std::env::var("PATH").unwrap_or_default()
 }
 
-/// Starts a program in its own session with no ties to the shell. It forks twice so the program
+/// Starts a program in its own session with no ties to the shell, in the language on screen. It forks twice so the program
 /// becomes a child of init: the shell never has to collect its exit and leaves no zombies.
 /// The program is started directly from its argument list; no shell reads the command.
 fn spawn_detached(argv: &[String], dir: Option<&str>) -> std::io::Result<()> {
@@ -317,6 +316,9 @@ fn spawn_detached(argv: &[String], dir: Option<&str>) -> std::io::Result<()> {
     let home = std::env::var("HOME").ok().filter(|h| std::path::Path::new(h).is_dir());
     let dir = dir.filter(|d| std::path::Path::new(d).is_dir()).map(str::to_string).or(home).unwrap_or_else(|| "/".into());
     cmd.current_dir(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    // Programs read LANG once, when they start: what the shell starts gets the language chosen
+    // in quick settings, also when that was changed after the session (and its LANG) began.
+    cmd.env("LANG", crate::lang::current().locale());
     unsafe {
         cmd.pre_exec(|| {
             libc::setsid();

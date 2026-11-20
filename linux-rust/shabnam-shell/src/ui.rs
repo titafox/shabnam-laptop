@@ -5,6 +5,7 @@
 use crate::apps::{self, App};
 use crate::draw::{argb, Canvas, Color, Fonts, Image};
 use crate::icons::Icons;
+use crate::lang::{self, fill, Count, Lang, Msg};
 use crate::sys::{self, Battery, NetDetail, Volume, Window};
 use crate::wifi::{self, Security};
 use std::sync::mpsc;
@@ -30,7 +31,8 @@ pub const SHELF_H: f32 = 52.0;
 const MARK: &str = "/usr/share/shabnam/mark.png";
 
 /// What the session-ending buttons run: the word tells the session script what to do once the
-/// compositor has quit ("mac": hand the panel to the Mac; "poweroff"; "reboot").
+/// compositor has quit ("mac": hand the panel to the Mac; "poweroff"; "reboot"; "desktop": start
+/// the desktop again, which is how a new system language reaches every program).
 fn end_session_command(mode: &str) -> String {
     format!("echo {mode} > /run/mode; niri msg action quit --skip-confirmation")
 }
@@ -177,6 +179,11 @@ enum QuickHit {
     /// The 隔空传送 switch and its "quick receive" switch.
     Drop,
     DropQuick,
+    /// The language row, one of its three choices, and the "restart the desktop" button of the
+    /// note that appears while other programs still run in the previous language.
+    Lang,
+    LangPick(Lang),
+    RestartDesktop,
 }
 
 impl QuickHit {
@@ -186,6 +193,7 @@ impl QuickHit {
             QuickHit::Mac => Some("mac"),
             QuickHit::Poweroff => Some("poweroff"),
             QuickHit::Reboot => Some("reboot"),
+            QuickHit::RestartDesktop => Some("desktop"),
             _ => None,
         }
     }
@@ -298,14 +306,67 @@ struct QuickLayout {
     brightness: Option<Rect>,
     volume: Option<Rect>,
     mute: Option<Rect>,
+    /// The language row; under it, while it is open, the three choices; then the note (its box
+    /// and, when a desktop restart would help, its button).
+    lang: Rect,
+    lang_choices: Option<[Rect; 3]>,
+    lang_note: Option<(Rect, Option<Rect>)>,
     footer_y: f32,
+}
+
+/// Height of one line of the language note, and of its button.
+const NOTE_LINE: f32 = 16.0;
+const NOTE_BUTTON: f32 = 30.0;
+
+/// Breaks `text` into at most `max_lines` lines no wider than `max_w`: at spaces where it has
+/// them (Russian, English), between characters where it has none (Chinese). What does not fit
+/// on the last line ends in an ellipsis.
+fn wrap(fonts: &mut Fonts, text: &str, size: f32, max_w: f32, max_lines: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut rest = text.trim();
+    while !rest.is_empty() {
+        if lines.len() + 1 >= max_lines || fonts.width(rest, size) <= max_w {
+            lines.push(fonts.fit(rest, size, max_w));
+            break;
+        }
+        let (mut end, mut space) = (0, None);
+        for (i, ch) in rest.char_indices() {
+            if fonts.width(&rest[..i + ch.len_utf8()], size) > max_w {
+                break;
+            }
+            if ch == ' ' {
+                space = Some(i);
+            }
+            end = i + ch.len_utf8();
+        }
+        if end == 0 {
+            end = rest.chars().next().map_or(rest.len(), char::len_utf8);
+        }
+        // Not through the middle of a word when there is a space to break at.
+        let cut = match space {
+            Some(space) if space > 0 && end < rest.len() && !rest[end..].starts_with(' ') => space,
+            _ => end,
+        };
+        lines.push(rest[..cut].trim_end().to_string());
+        rest = rest[cut..].trim_start();
+    }
+    lines
 }
 
 pub struct Ui {
     pub fonts: Fonts,
     icons: Icons,
-    /// Chinese interface text; false when no font with Chinese glyphs was found at start-up.
-    zh: bool,
+    /// The language the session was started in (its LANG): what programs that are already
+    /// running, and those the compositor starts, still speak after the language was switched.
+    session_lang: Lang,
+    /// The three choices under the language row are showing.
+    lang_open: bool,
+    /// The last language choice could not be written to the locale file.
+    lang_error: bool,
+    /// The note under the language row, broken into lines; empty when there is nothing to say.
+    lang_note: Vec<String>,
+    /// The armed button was armed by a test command: the confirming click only disarms it.
+    armed_demo: bool,
     apps: Vec<App>,
     apps_stamp: Vec<Option<SystemTime>>,
     pins: Vec<String>,
@@ -399,11 +460,28 @@ fn looks_like_url(query: &str) -> bool {
 impl Ui {
     pub fn new() -> Ui {
         let mut fonts = Fonts::load();
-        let zh = fonts.can_show("搜索应用网址最近使用全部亮度音量电量副屏");
+        // The language: the word the language switch left in the locale file, else the session's LANG.
+        let file = std::fs::read_to_string(lang::LOCALE_FILE).ok();
+        let var = std::env::var("LANG").ok();
+        let mut language = lang::startup(file.as_deref(), var.as_deref());
+        // A language no installed font has the letters for cannot be shown: English then.
+        let sample = match language {
+            Lang::Zh => "搜索应用网址最近使用全部亮度音量电量副屏语言",
+            Lang::Ru => "Поиск приложений Яркость Громкость Язык Выключить",
+            Lang::En => "",
+        };
+        if !fonts.can_show(sample) {
+            language = Lang::En;
+        }
+        lang::set_current(language);
         let mut ui = Ui {
             fonts,
             icons: Icons::new(),
-            zh,
+            session_lang: var.as_deref().and_then(Lang::from_locale).unwrap_or(Lang::Zh),
+            lang_open: false,
+            lang_error: false,
+            lang_note: Vec::new(),
+            armed_demo: false,
             apps: Vec::new(),
             apps_stamp: Vec::new(),
             pins: Vec::new(),
@@ -449,21 +527,109 @@ impl Ui {
         };
         ui.reload_apps();
         ui.tick();
+        ui.refresh_lang_note();
         ui
     }
 
-    fn t<'a>(&self, zh: &'a str, en: &'a str) -> &'a str {
-        if self.zh {
-            zh
+    /// A text of the shell in the language on screen (all of them are in lang.rs).
+    fn t(&self, msg: Msg) -> &'static str {
+        msg.text(lang::current())
+    }
+
+    /// An application's name in the language on screen: Name[ru] in Russian, Name[zh_CN] in
+    /// Chinese …, the plain Name where the desktop file has no translation.
+    fn name_of(&self, app: &App) -> String {
+        app.name_in(lang::current().desktop_keys()).to_string()
+    }
+
+    /// The largest text size, from `size` down to 2.5 below it, at which `text` is no wider
+    /// than `max_w` — for labels that are longer in one language than in another.
+    fn size_to_fit(&mut self, text: &str, size: f32, max_w: f32) -> f32 {
+        let mut fitted = size;
+        while fitted > size - 2.5 && self.fonts.width(text, fitted) > max_w {
+            fitted -= 0.5;
+        }
+        fitted
+    }
+
+    /// Like `Canvas::text_centered`, but a label too long for `max_w` is first drawn smaller
+    /// and only then shortened.
+    fn label_centered(&mut self, c: &mut Canvas, text: &str, cx: f32, mid_y: f32, size: f32, max_w: f32, ink: Color) {
+        let size = self.size_to_fit(text, size, max_w);
+        c.text_centered(&mut self.fonts, text, cx, mid_y, size, max_w, ink);
+    }
+
+    // ---------- language ----------
+
+    /// Switches the system language: the language row's choices and `shabnam-shell lang WORD`
+    /// both end here. The word goes to the locale file (the session script exports it as LANG
+    /// the next time the desktop starts), the shell's own texts change at once, and programs
+    /// started from the shell from now on get the new LANG.
+    pub fn set_language(&mut self, language: Lang) {
+        self.lang_error = match lang::save(language) {
+            Ok(()) => false,
+            Err(e) => {
+                eprintln!("shabnam-shell: cannot write {}: {e}", lang::LOCALE_FILE);
+                true
+            }
+        };
+        self.lang_open = false;
+        lang::set_current(language);
+        self.relabel();
+    }
+
+    /// Everything that holds text made in the previous language is made again.
+    fn relabel(&mut self) {
+        self.icons.forget();
+        self.rebuild_shelf();
+        self.date.clear();
+        self.tick();
+        if self.open == Some(Panel::Launcher) {
+            self.layout_launcher();
+        }
+        self.menu = None;
+        self.armed = None;
+        if !self.wifi.busy {
+            self.wifi.message = None;
+        }
+        self.refresh_lang_note();
+        (self.dirty_shelf, self.dirty_panel, self.dirty_osd, self.dirty_notice) = (true, self.open.is_some(), true, true);
+    }
+
+    /// The note under the language row: while the language on screen is not the one the session
+    /// was started in, other programs have not followed yet.
+    fn refresh_lang_note(&mut self) {
+        let msg = if self.lang_error {
+            Some(Msg::LanguageNotSaved)
+        } else if lang::current() != self.session_lang {
+            Some(Msg::LanguageNotice)
         } else {
-            en
+            None
+        };
+        let room = 384.0f32.min(self.panel_size.0 - 20.0) - 28.0 - 24.0;
+        self.lang_note = match msg {
+            Some(msg) => wrap(&mut self.fonts, msg.text(lang::current()), 12.0, room, 2),
+            None => Vec::new(),
+        };
+    }
+
+    /// Test command: with the quick panel open, shows the three language choices.
+    pub fn test_lang_menu(&mut self) {
+        if self.open == Some(Panel::Quick) {
+            self.quick_view = QuickView::Main;
+            self.lang_open = true;
+            self.dirty_panel = true;
         }
     }
 
-    fn name_of(&self, app: &App) -> String {
-        match (&app.name_zh, self.zh) {
-            (Some(zh), true) => zh.clone(),
-            _ => app.name.clone(),
+    /// Test command: with the quick panel open, shows a session-ending button as it looks after
+    /// its first click ("poweroff", "reboot", "mac", "desktop"). Clicking it then only disarms it.
+    pub fn test_arm(&mut self, word: &str) {
+        let hit = [QuickHit::Poweroff, QuickHit::Reboot, QuickHit::Mac, QuickHit::RestartDesktop].into_iter().find(|h| h.mode() == Some(word));
+        if let (Some(Panel::Quick), Some(hit)) = (self.open, hit) {
+            self.quick_view = QuickView::Main;
+            (self.armed, self.armed_demo) = (Some(hit), true);
+            self.dirty_panel = true;
         }
     }
 
@@ -486,7 +652,7 @@ impl Ui {
     /// Refreshes clock, battery and network; returns how long until the next call is due.
     pub fn tick(&mut self) -> Duration {
         let now = sys::now();
-        let date = if self.zh { now.date_zh } else { now.date_en };
+        let date = lang::date(lang::current(), now.weekday, now.month, now.day);
         let battery = sys::battery();
         let online = sys::network_interface().is_some();
         if now.time != self.time || battery != self.battery || online != self.online {
@@ -546,7 +712,7 @@ impl Ui {
                                 label = window.title.trim().to_string();
                             }
                             if label.is_empty() {
-                                label = self.t("窗口", "Window").to_string();
+                                label = self.t(Msg::Window).to_string();
                             }
                             let lower = window.app_id.to_lowercase();
                             let last = lower.rsplit('.').next().unwrap_or("").to_string();
@@ -798,6 +964,7 @@ impl Ui {
         self.armed = None;
         self.quick_hover = None;
         self.quick_view = QuickView::Main;
+        self.lang_open = false;
         self.menu = None;
         match panel {
             Panel::Menu => self.menu = self.menu_request.take(),
@@ -811,6 +978,7 @@ impl Ui {
                 self.brightness = sys::brightness();
                 self.volume = sys::volume();
                 self.net = sys::network_detail();
+                self.refresh_lang_note();
             }
         }
         self.dirty_panel = true;
@@ -830,6 +998,7 @@ impl Ui {
         self.drag = None;
         self.armed = None;
         self.menu = None;
+        self.lang_open = false;
         self.quick_view = QuickView::Main;
         self.wifi.wipe_password();
         self.wifi.target = None;
@@ -891,18 +1060,18 @@ impl Ui {
                 .take(5)
                 .collect();
             if !recent.is_empty() {
-                grid(self.t("最近使用", "Recent"), &recent, &mut y);
+                grid(self.t(Msg::Recent), &recent, &mut y);
             }
             let mut all: Vec<usize> = (0..self.apps.len()).filter(|i| !self.hidden.contains(&self.apps[*i].id)).collect();
             all.sort_by_key(|i| self.name_of(&self.apps[*i]).to_lowercase());
-            grid(self.t("全部应用", "All apps"), &all, &mut y);
+            grid(self.t(Msg::AllApps), &all, &mut y);
             self.selected = None;
         } else {
             let mut targets = Vec::new();
             if looks_like_url(&self.query) {
                 targets.push(Target::Url(self.query.trim().to_string()));
             }
-            targets.extend(apps::filter(&self.apps, &self.query).into_iter().map(Target::App));
+            targets.extend(apps::filter(&self.apps, &self.query, lang::current().desktop_keys()).into_iter().map(Target::App));
             for target in targets {
                 rows.push(vec![entries.len()]);
                 entries.push(Entry { rect: (0.0, y, width, 48.0), target, cell: false });
@@ -1004,7 +1173,7 @@ impl Ui {
         c.rrect(fx, fy, fw, 40.0, 20.0, CHIP);
         let mid = fy + 20.0;
         let caret = if self.query.is_empty() {
-            let hint = self.t("搜索应用、网址…", "Search apps, web addresses…");
+            let hint = self.t(Msg::SearchHint);
             c.text(&mut self.fonts, hint, fx + 21.0, mid, 14.0, TEXT2);
             fx + 16.0
         } else {
@@ -1041,7 +1210,7 @@ impl Ui {
                     let app = &self.apps[*index];
                     (app.id.clone(), app.icon.clone(), self.name_of(app))
                 }
-                Target::Url(url) => (String::new(), String::new(), format!("{} {url}", self.t("打开网址", "Open"))),
+                Target::Url(url) => (String::new(), String::new(), fill(self.t(Msg::OpenUrl), &[url])),
             };
             if entry.cell {
                 let tile = self.icons.tile(&key, &icon, true, &label, cell_px, &mut self.fonts);
@@ -1060,7 +1229,7 @@ impl Ui {
             }
         }
         if self.entries.is_empty() {
-            let text = self.t("没有匹配的应用", "No matching apps");
+            let text = self.t(Msg::NoMatch);
             c.text(&mut self.fonts, text, view.0 + 8.0, view.1 + 20.0, 13.0, TEXT2);
         }
         c.set_clip(None);
@@ -1079,7 +1248,15 @@ impl Ui {
         let (pw, ph) = self.panel_size;
         let width = 384.0f32.min(pw - 20.0);
         let sliders = self.brightness.is_some() as u32 + self.volume.is_some() as u32;
-        let height = 14.0 + 34.0 + 10.0 + 48.0 + 10.0 + 48.0 + 10.0 + sliders as f32 * 40.0 + 6.0 + 40.0 + 15.0 + 24.0 + 10.0;
+        // The language row, its choices while it is open, and its note while there is one.
+        let note_h = if self.lang_note.is_empty() {
+            0.0
+        } else {
+            let button = if self.lang_note_button() { 8.0 + NOTE_BUTTON } else { 0.0 };
+            10.0 + self.lang_note.len() as f32 * NOTE_LINE + button + 10.0
+        };
+        let lang_h = 6.0 + 40.0 + if self.lang_open { 6.0 + 40.0 } else { 0.0 } + if note_h > 0.0 { 8.0 + note_h } else { 0.0 };
+        let height = 14.0 + 34.0 + 10.0 + 48.0 + 10.0 + 48.0 + 10.0 + sliders as f32 * 40.0 + lang_h + 6.0 + 40.0 + 15.0 + 24.0 + 10.0;
         let (x, y) = (pw - 10.0 - width, ph - 8.0 - height);
         let (left, inner) = (x + 14.0, width - 28.0);
         let pills_y = y + 14.0 + 34.0 + 10.0;
@@ -1103,6 +1280,22 @@ impl Ui {
             mute = Some((left + inner - 34.0, row_y + 3.0, 34.0, 34.0));
             row_y += 40.0;
         }
+        // Language: the row, then the three choices, then the note.
+        let lang = (left, row_y + 6.0, inner, 40.0);
+        row_y += 6.0 + 40.0;
+        let mut lang_choices = None;
+        if self.lang_open {
+            let third = (inner - 16.0) / 3.0;
+            lang_choices = Some([0.0, 1.0, 2.0].map(|i| (left + i * (third + 8.0), row_y + 6.0, third, 40.0)));
+            row_y += 6.0 + 40.0;
+        }
+        let mut lang_note = None;
+        if note_h > 0.0 {
+            let note = (left, row_y + 8.0, inner, note_h);
+            let button = self.lang_note_button().then_some((left + 12.0, note.1 + note_h - 10.0 - NOTE_BUTTON, inner - 24.0, NOTE_BUTTON));
+            lang_note = Some((note, button));
+            row_y += 8.0 + note_h;
+        }
         // Power row.
         let power_y = row_y + 6.0;
         row_y = power_y + 40.0;
@@ -1117,8 +1310,17 @@ impl Ui {
             brightness,
             volume,
             mute,
+            lang,
+            lang_choices,
+            lang_note,
             footer_y: row_y + 15.0,
         }
+    }
+
+    /// Whether the language note offers to restart the desktop: only when that would change
+    /// anything, that is while the session still runs in another language.
+    fn lang_note_button(&self) -> bool {
+        lang::current() != self.session_lang
     }
 
     fn quick_hit(&self, x: f32, y: f32) -> Option<QuickHit> {
@@ -1137,6 +1339,12 @@ impl Ui {
             Some(QuickHit::Reboot)
         } else if layout.mute.is_some_and(|r| inside(r, x, y)) {
             Some(QuickHit::Mute)
+        } else if inside(layout.lang, x, y) {
+            Some(QuickHit::Lang)
+        } else if let Some(choice) = layout.lang_choices.and_then(|rects| rects.iter().position(|r| inside(*r, x, y))) {
+            Some(QuickHit::LangPick(Lang::ALL[choice]))
+        } else if layout.lang_note.and_then(|(_, button)| button).is_some_and(|r| inside(r, x, y)) {
+            Some(QuickHit::RestartDesktop)
         } else {
             None
         }
@@ -1195,7 +1403,17 @@ impl Ui {
             (Some(QuickHit::Wifi), _) => self.show_wifi(),
             (Some(QuickHit::Drop), _) => self.drop_tile_click(),
             (Some(QuickHit::DropQuick), _) => self.drop_quick_click(),
+            (Some(QuickHit::Lang), _) => {
+                self.lang_open = !self.lang_open;
+                self.dirty_panel = true;
+            }
+            (Some(QuickHit::LangPick(language)), _) => self.set_language(language),
             (Some(button), Some(mode)) => {
+                if self.armed == Some(button) && self.armed_demo {
+                    // Armed by a test command: nothing ends.
+                    (self.armed, self.armed_demo, self.dirty_panel) = (None, false, true);
+                    return Act::None;
+                }
                 if self.armed == Some(button) {
                     if let Err(e) = sys::spawn(&["/bin/sh", "-c", &end_session_command(mode)]) {
                         eprintln!("shabnam-shell: cannot end the session ({mode}): {e}");
@@ -1203,7 +1421,7 @@ impl Ui {
                     return Act::Close;
                 }
                 // It ends the desktop session, so it takes a second click to confirm.
-                self.armed = Some(button);
+                (self.armed, self.armed_demo) = (Some(button), false);
                 self.dirty_panel = true;
             }
             _ => {}
@@ -1219,7 +1437,7 @@ impl Ui {
             c.rrect(rect.0, rect.1, rect.2, rect.3, 20.0, HOVER);
         }
         let (text, ink) = if armed { (confirm, ON_ACCENT) } else { (label, TEXT) };
-        c.text_centered(&mut self.fonts, text, rect.0 + rect.2 / 2.0, rect.1 + rect.3 / 2.0, 13.0, rect.2 - 20.0, ink);
+        self.label_centered(c, text, rect.0 + rect.2 / 2.0, rect.1 + rect.3 / 2.0, 13.0, rect.2 - 20.0, ink);
     }
 
     fn pill(&mut self, c: &mut Canvas, rect: Rect, title: &str, sub: &str, fill: Color, ink: Color, sub_ink: Color, hover: bool) {
@@ -1227,16 +1445,19 @@ impl Ui {
         if hover {
             c.rrect(rect.0, rect.1, rect.2, rect.3, 24.0, HOVER);
         }
+        // A title or line that is long in this language gets smaller before it gets cut.
         let room = rect.2 - 30.0;
-        let title = self.fonts.fit(title, 13.0, room);
-        let sub = self.fonts.fit(sub, 11.0, room);
-        c.text(&mut self.fonts, &title, rect.0 + 18.0, rect.1 + 16.0, 13.0, ink);
-        c.text(&mut self.fonts, &sub, rect.0 + 18.0, rect.1 + 33.0, 11.0, sub_ink);
+        let (title_size, sub_size) = (self.size_to_fit(title, 13.0, room), self.size_to_fit(sub, 11.0, room).max(10.0));
+        let title = self.fonts.fit(title, title_size, room);
+        let sub = self.fonts.fit(sub, sub_size, room);
+        c.text(&mut self.fonts, &title, rect.0 + 18.0, rect.1 + 16.0, title_size, ink);
+        c.text(&mut self.fonts, &sub, rect.0 + 18.0, rect.1 + 33.0, sub_size, sub_ink);
     }
 
     fn slider(&mut self, c: &mut Canvas, track: Rect, label: &str, position: f32, live: bool) {
         let mid = track.1 + track.3 / 2.0;
-        c.text(&mut self.fonts, label, track.0 - 62.0, mid, 12.0, TEXT2);
+        let size = self.size_to_fit(label, 12.0, 64.0);
+        c.text(&mut self.fonts, label, track.0 - 62.0, mid, size, TEXT2);
         let (start, length) = (track.0 + 8.0, track.2 - 16.0);
         let knob = start + length * position.clamp(0.0, 1.0);
         let color = if live { ACCENT } else { TEXT2 };
@@ -1256,13 +1477,13 @@ impl Ui {
         c.text(&mut self.fonts, &self.date.clone(), left + 4.0, mid, 15.0, TEXT);
         if let Some(battery) = self.battery.clone() {
             let state = if battery.full {
-                self.t(" · 已充满", " · full")
+                Msg::BatteryFull
             } else if battery.charging {
-                self.t(" · 充电中", " · charging")
+                Msg::BatteryCharging
             } else {
-                ""
+                Msg::Battery
             };
-            let text = format!("{} {}%{}", self.t("电量", "Battery"), battery.percent, state);
+            let text = fill(self.t(state), &[&battery.percent.to_string()]);
             let width = self.fonts.width(&text, 12.0);
             c.text(&mut self.fonts, &text, right - 4.0 - width, mid, 12.0, TEXT2);
         }
@@ -1271,9 +1492,9 @@ impl Ui {
         let wifi_up = self.net.interface.as_deref().is_some_and(|i| i.starts_with("wl"));
         let sub = match (&self.net.ssid, wifi_up, &self.net.interface) {
             (Some(ssid), _, _) => ssid.clone(),
-            (None, true, _) => self.t("已连接", "Connected").to_string(),
-            (None, false, Some(other)) => format!("{} {other}", self.t("未连接 · 有线", "Off · wired")),
-            (None, false, None) => self.t("未连接", "Not connected").to_string(),
+            (None, true, _) => self.t(Msg::Connected).to_string(),
+            (None, false, Some(other)) => fill(self.t(Msg::WiredOnly), &[other]),
+            (None, false, None) => self.t(Msg::NotConnected).to_string(),
         };
         let (fill, ink, sub_ink) = if wifi_up { (ACCENT, ON_ACCENT, ON_ACCENT) } else { (CHIP, TEXT, TEXT2) };
         self.pill(c, layout.wifi, "Wi-Fi", &sub, fill, ink, sub_ink, !wifi_up && self.quick_hover == Some(QuickHit::Wifi));
@@ -1288,10 +1509,10 @@ impl Ui {
         });
         let hover = self.quick_hover == Some(QuickHit::Mac);
         if self.armed == Some(QuickHit::Mac) {
-            let (title, sub) = (self.t("再点一次确认", "Click again to confirm"), self.t("将结束当前桌面会话", "Ends this desktop session"));
+            let (title, sub) = (self.t(Msg::ConfirmTitle), self.t(Msg::ConfirmSub));
             self.pill(c, layout.mac, title, sub, WARN, ON_ACCENT, ON_ACCENT, false);
         } else {
-            let (title, sub) = (self.t("Mac 副屏", "Second screen"), self.t("切换为 Mac 的第二屏幕", "Become the Mac's display"));
+            let (title, sub) = (self.t(Msg::MacTitle), self.t(Msg::MacSub));
             self.pill(c, layout.mac, title, sub, CHIP, TEXT, TEXT2, hover);
         }
 
@@ -1300,11 +1521,11 @@ impl Ui {
         // Sliders.
         if let (Some(track), Some(percent)) = (layout.brightness, self.brightness) {
             let min = sys::MIN_BRIGHTNESS as f32;
-            let label = self.t("亮度", "Brightness");
+            let label = self.t(Msg::Brightness);
             self.slider(c, track, label, (percent as f32 - min) / (100.0 - min), true);
         }
         if let (Some(track), Some(volume), Some(mute)) = (layout.volume, self.volume, layout.mute) {
-            let label = self.t("音量", "Volume");
+            let label = self.t(Msg::Volume);
             self.slider(c, track, label, volume.percent as f32 / 100.0, !volume.muted);
             let (cx, cy) = (mute.0 + 17.0, mute.1 + 17.0);
             c.circle(cx, cy, 17.0, if volume.muted { ACCENT } else { CHIP });
@@ -1315,10 +1536,12 @@ impl Ui {
             c.shape(cx - 9.0, cy - 9.0, 18.0, 18.0, if muted { ON_ACCENT } else { TEXT }, move |gx, gy| speaker_shape(gx, gy, muted));
         }
 
+        self.draw_language(c, &layout);
+
         // Power row.
-        let (label, confirm) = (self.t("关机", "Power off"), self.t("再点一次确认关机", "Click again: power off"));
+        let (label, confirm) = (self.t(Msg::PowerOff), self.t(Msg::PowerOffConfirm));
         self.power_pill(c, layout.poweroff, QuickHit::Poweroff, label, confirm);
-        let (label, confirm) = (self.t("重启", "Restart"), self.t("再点一次确认重启", "Click again: restart"));
+        let (label, confirm) = (self.t(Msg::Restart), self.t(Msg::RestartConfirm));
         self.power_pill(c, layout.reboot, QuickHit::Reboot, label, confirm);
 
         // Network line.
@@ -1326,9 +1549,59 @@ impl Ui {
         let line = match (&self.net.interface, &self.net.address) {
             (Some(interface), Some(address)) => format!("{interface} · {address}"),
             (Some(interface), None) => interface.clone(),
-            _ => self.t("网络未连接", "No network").to_string(),
+            _ => self.t(Msg::NoNetwork).to_string(),
         };
         c.text(&mut self.fonts, &line, left + 4.0, layout.footer_y + 12.0, 11.5, TEXT2);
+    }
+
+    /// The language row (label, the current language, a chevron), the three choices while it
+    /// is open — each written in its own language — and the note about programs still running
+    /// in the previous language, with its button to restart the desktop.
+    fn draw_language(&mut self, c: &mut Canvas, layout: &QuickLayout) {
+        let (x, y, w, h) = layout.lang;
+        let mid = y + h / 2.0;
+        c.rrect(x, y, w, h, 20.0, CHIP);
+        if self.quick_hover == Some(QuickHit::Lang) || self.lang_open {
+            c.rrect(x, y, w, h, 20.0, HOVER);
+        }
+        let label = self.t(Msg::Language);
+        c.text(&mut self.fonts, label, x + 18.0, mid, 13.0, TEXT);
+        let name = lang::current().own_name();
+        let width = self.fonts.width(name, 13.0);
+        c.text(&mut self.fonts, name, x + w - 36.0 - width, mid, 13.0, TEXT2);
+        // The chevron points down while the choices are showing.
+        let open = self.lang_open;
+        c.shape(x + w - 29.0, mid - 8.0, 16.0, 16.0, TEXT, move |gx, gy| {
+            let (along, across) = if open { (gx - 8.0, gy - 5.5) } else { (gy - 8.0, gx - 5.5) };
+            let d = along.abs();
+            d <= 5.5 && (across - (5.5 - d)).abs() <= 0.95
+        });
+        if let Some(rects) = layout.lang_choices {
+            for (language, (rx, ry, rw, rh)) in Lang::ALL.into_iter().zip(rects) {
+                let chosen = language == lang::current();
+                c.rrect(rx, ry, rw, rh, 20.0, if chosen { ACCENT } else { CHIP });
+                if self.quick_hover == Some(QuickHit::LangPick(language)) {
+                    c.rrect(rx, ry, rw, rh, 20.0, if chosen { argb(0x33FFFFFF) } else { HOVER });
+                }
+                self.label_centered(c, language.own_name(), rx + rw / 2.0, ry + rh / 2.0, 13.0, rw - 16.0, if chosen { ON_ACCENT } else { TEXT });
+            }
+        }
+        if let Some(((nx, ny, nw, nh), button)) = layout.lang_note {
+            c.rrect(nx, ny, nw, nh, 14.0, argb(0x14FFFFFF));
+            let ink = if self.lang_error { WARN } else { TEXT2 };
+            for (i, line) in self.lang_note.clone().iter().enumerate() {
+                c.text(&mut self.fonts, line, nx + 12.0, ny + 10.0 + (i as f32 + 0.5) * NOTE_LINE, 12.0, ink);
+            }
+            if let Some((bx, by, bw, bh)) = button {
+                let armed = self.armed == Some(QuickHit::RestartDesktop);
+                c.rrect(bx, by, bw, bh, 15.0, if armed { WARN } else { CHIP });
+                if !armed && self.quick_hover == Some(QuickHit::RestartDesktop) {
+                    c.rrect(bx, by, bw, bh, 15.0, HOVER);
+                }
+                let (text, ink) = if armed { (self.t(Msg::RestartDesktopConfirm), ON_ACCENT) } else { (self.t(Msg::RestartDesktop), TEXT) };
+                self.label_centered(c, text, bx + bw / 2.0, by + bh / 2.0, 12.5, bw - 20.0, ink);
+            }
+        }
     }
 
     // ---------- input ----------
@@ -1559,19 +1832,19 @@ impl Ui {
             }
             wifi::Event::ScanDone => self.wifi.scanning = false,
             wifi::Event::Associated => {
-                self.wifi.message = Some((self.t("已连接，正在获取地址…", "Connected, getting an address…").to_string(), false));
+                self.wifi.message = Some((self.t(Msg::WifiGettingAddress).to_string(), false));
             }
             wifi::Event::Address(address) => {
                 self.wifi.busy = false;
                 self.wifi.message = Some(match address {
-                    Some(address) => (format!("{} · {address}", self.t("已连接", "Connected")), false),
-                    None => (self.t("已连接，尚未获得地址", "Connected, no address yet").to_string(), true),
+                    Some(address) => (fill(self.t(Msg::WifiConnectedAt), &[&address]), false),
+                    None => (self.t(Msg::WifiNoAddress).to_string(), true),
                 });
                 self.net = sys::network_detail();
             }
             wifi::Event::Failed => {
                 self.wifi.busy = false;
-                self.wifi.message = Some((self.t("密码错误或无法连接", "Wrong password or cannot connect").to_string(), true));
+                self.wifi.message = Some((self.t(Msg::WifiFailed).to_string(), true));
                 self.net = sys::network_detail();
             }
         }
@@ -1588,13 +1861,15 @@ impl Ui {
         let footer_y = y + height - 10.0 - 24.0;
         let field = (left, top + 40.0, inner, 40.0);
         let buttons_y = field.1 + field.3 + 36.0;
+        // "Показать" is longer than "显示" or "Show".
+        let reveal_w = if lang::current() == Lang::Ru { 80.0 } else { 56.0 };
         WifiLayout {
             rect: (x, y, width, height),
             back: (left, y + 14.0, 34.0, 34.0),
             rescan: (left + inner - 34.0, y + 14.0, 34.0, 34.0),
             body: (left, top, inner, footer_y - 15.0 - top),
             field,
-            reveal: (left + inner - 61.0, field.1 + 5.0, 56.0, 30.0),
+            reveal: (left + inner - 5.0 - reveal_w, field.1 + 5.0, reveal_w, 30.0),
             cancel: (left + inner - 96.0 * 2.0 - 8.0, buttons_y, 96.0, 36.0),
             connect: (left + inner - 96.0, buttons_y, 96.0, 36.0),
             footer_y,
@@ -1643,7 +1918,7 @@ impl Ui {
     fn wifi_connect(&mut self, target: wifi::Target, name: &str) {
         if self.wifi_send(wifi::Request::Connect(target)) {
             self.wifi.busy = true;
-            self.wifi.message = Some((format!("{} {name}…", self.t("正在连接", "Connecting to")), false));
+            self.wifi.message = Some((fill(self.t(Msg::WifiConnecting), &[name]), false));
         }
         self.dirty_panel = true;
     }
@@ -1656,14 +1931,14 @@ impl Ui {
         let (ssid, name, security, known, current) = (row.ssid.clone(), row.name.clone(), row.security, row.known, row.current);
         self.dirty_panel = true;
         if current {
-            self.wifi.message = Some((self.t("已连接到此网络", "Already connected to this network").to_string(), false));
+            self.wifi.message = Some((self.t(Msg::WifiAlready).to_string(), false));
             return;
         }
         match (known, security) {
             (Some(id), _) => self.wifi_connect(wifi::Target::Known(id), &name),
             (None, Security::Open) => self.wifi_connect(wifi::Target::New { ssid, security, password: None }, &name),
             (None, Security::Unsupported) => {
-                self.wifi.message = Some((self.t("暂不支持这种加密方式", "This kind of security is not supported").to_string(), true));
+                self.wifi.message = Some((self.t(Msg::WifiUnsupported).to_string(), true));
             }
             (None, _) => {
                 self.wifi.wipe_password();
@@ -1769,7 +2044,7 @@ impl Ui {
                 ring || head
             });
             if self.wifi.scanning {
-                let text = self.t("正在扫描…", "Scanning…");
+                let text = self.t(Msg::Scanning);
                 let width = self.fonts.width(text, 12.0);
                 c.text(&mut self.fonts, text, layout.rescan.0 - 10.0 - width, mid, 12.0, TEXT2);
             }
@@ -1790,7 +2065,7 @@ impl Ui {
                 match (status.connected(), &status.ssid, &status.ip) {
                     (true, Some(ssid), Some(ip)) => (format!("{} · {ip}", wifi::display_ssid(ssid)), false),
                     (true, Some(ssid), None) => (wifi::display_ssid(ssid), false),
-                    _ => (self.t("未连接", "Not connected").to_string(), false),
+                    _ => (self.t(Msg::NotConnected).to_string(), false),
                 }
             }
         };
@@ -1801,7 +2076,7 @@ impl Ui {
     fn draw_wifi_rows(&mut self, c: &mut Canvas, layout: &WifiLayout) {
         let body = layout.body;
         if self.wifi.rows.is_empty() {
-            let text = if self.wifi.scanning { self.t("正在查找网络…", "Looking for networks…") } else { self.t("没有找到网络", "No networks found") };
+            let text = if self.wifi.scanning { self.t(Msg::LookingForNetworks) } else { self.t(Msg::NoNetworksFound) };
             c.text(&mut self.fonts, text, body.0 + 8.0, body.1 + 22.0, 13.0, TEXT2);
             return;
         }
@@ -1831,11 +2106,11 @@ impl Ui {
                 c.rrect(body.0 + 12.0 + bar as f32 * 4.5, ry + 31.0 - height, 3.0, height, 1.0, color);
             }
             let sub = match (current, known, security) {
-                (true, _, _) => self.t("已连接", "Connected"),
-                (_, Some(_), _) => self.t("已保存", "Saved"),
-                (_, _, Security::Open) => self.t("开放网络", "Open"),
-                (_, _, Security::Unsupported) => self.t("不支持的加密方式", "Unsupported security"),
-                _ => self.t("加密", "Secured"),
+                (true, _, _) => self.t(Msg::Connected),
+                (_, Some(_), _) => self.t(Msg::Saved),
+                (_, _, Security::Open) => self.t(Msg::OpenNetwork),
+                (_, _, Security::Unsupported) => self.t(Msg::UnsupportedSecurity),
+                _ => self.t(Msg::Secured),
             };
             let room = body.2 - 44.0 - 40.0;
             let name = self.fonts.fit(&name, 13.5, room);
@@ -1863,7 +2138,7 @@ impl Ui {
     fn draw_password(&mut self, c: &mut Canvas, layout: &WifiLayout) {
         let body = layout.body;
         let name = self.wifi.target.as_ref().map(|(ssid, _)| wifi::display_ssid(ssid)).unwrap_or_default();
-        let title = format!("{} {name}", self.t("连接到", "Connect to"));
+        let title = fill(self.t(Msg::ConnectTo), &[&name]);
         let title = self.fonts.fit(&title, 13.5, body.2 - 8.0);
         c.text(&mut self.fonts, &title, body.0 + 4.0, body.1 + 18.0, 13.5, TEXT);
 
@@ -1871,9 +2146,9 @@ impl Ui {
         let (fx, fy, fw, fh) = layout.field;
         c.rrect(fx, fy, fw, fh, 20.0, CHIP);
         let mid = fy + fh / 2.0;
-        let room = fw - 16.0 - 70.0;
+        let room = fw - 16.0 - layout.reveal.2 - 14.0;
         let caret = if self.wifi.password.is_empty() {
-            let hint = self.t("密码", "Password");
+            let hint = self.t(Msg::Password);
             c.text(&mut self.fonts, hint, fx + 21.0, mid, 14.0, TEXT2);
             fx + 16.0
         } else {
@@ -1894,25 +2169,25 @@ impl Ui {
         if self.wifi.hover == Some(WifiHit::Reveal) {
             c.rrect(rx, ry, rw, rh, 15.0, HOVER);
         }
-        let label = if self.wifi.reveal { self.t("隐藏", "Hide") } else { self.t("显示", "Show") };
-        c.text_centered(&mut self.fonts, label, rx + rw / 2.0, ry + rh / 2.0, 12.0, rw - 8.0, if self.wifi.reveal { ON_ACCENT } else { TEXT });
+        let label = if self.wifi.reveal { self.t(Msg::Hide) } else { self.t(Msg::Show) };
+        self.label_centered(c, label, rx + rw / 2.0, ry + rh / 2.0, 12.0, rw - 8.0, if self.wifi.reveal { ON_ACCENT } else { TEXT });
 
         let (hint, ink) = if self.wifi.bad_password {
-            (self.t("密码须为 8–63 个字符，且不能含双引号", "8 to 63 characters, no double quote"), WARN)
+            (self.t(Msg::BadPassword), WARN)
         } else {
-            (self.t("输入密码后按回车或点「连接」", "Type the password, then Enter or Connect"), TEXT2)
+            (self.t(Msg::PasswordHint), TEXT2)
         };
         c.text(&mut self.fonts, hint, fx + 4.0, fy + fh + 16.0, 11.5, ink);
 
         for (rect, hit, label, fill, ink) in [
-            (layout.cancel, WifiHit::Cancel, self.t("取消", "Cancel"), CHIP, TEXT),
-            (layout.connect, WifiHit::Connect, self.t("连接", "Connect"), ACCENT, ON_ACCENT),
+            (layout.cancel, WifiHit::Cancel, self.t(Msg::Cancel), CHIP, TEXT),
+            (layout.connect, WifiHit::Connect, self.t(Msg::Connect), ACCENT, ON_ACCENT),
         ] {
             c.rrect(rect.0, rect.1, rect.2, rect.3, 18.0, fill);
             if self.wifi.hover == Some(hit) {
                 c.rrect(rect.0, rect.1, rect.2, rect.3, 18.0, if hit == WifiHit::Connect { argb(0x33FFFFFF) } else { HOVER });
             }
-            c.text_centered(&mut self.fonts, label, rect.0 + rect.2 / 2.0, rect.1 + rect.3 / 2.0, 13.0, rect.2 - 12.0, ink);
+            self.label_centered(c, label, rect.0 + rect.2 / 2.0, rect.1 + rect.3 / 2.0, 13.0, rect.2 - 12.0, ink);
         }
     }
 
@@ -1932,7 +2207,7 @@ impl Ui {
         let row = self.wifi.rows.iter().find(|r| r.known.is_none() && matches!(r.security, Security::Psk | Security::Sae));
         self.wifi.target = Some(match row {
             Some(row) => (row.ssid.clone(), row.security),
-            None => (self.t("示例网络", "Example network").as_bytes().to_vec(), Security::Psk),
+            None => (self.t(Msg::ExampleNetwork).as_bytes().to_vec(), Security::Psk),
         });
         self.wifi.demo = true;
         self.quick_view = QuickView::Password;
@@ -1986,21 +2261,21 @@ impl Ui {
         let mut items: Vec<(String, MenuAct)> = Vec::new();
         if let Some(index) = app {
             let id = self.apps[index].id.clone();
-            let first = if from_shelf { self.t("新窗口", "New window") } else { self.t("打开", "Open") };
+            let first = if from_shelf { self.t(Msg::NewWindow) } else { self.t(Msg::Open) };
             items.push((first.to_string(), MenuAct::Start(id.clone())));
-            let pin = if self.pins.contains(&id) { self.t("取消固定", "Unpin") } else { self.t("固定到底栏", "Pin to shelf") };
+            let pin = if self.pins.contains(&id) { self.t(Msg::Unpin) } else { self.t(Msg::Pin) };
             items.push((pin.to_string(), MenuAct::TogglePin(id.clone())));
             if !from_shelf {
                 let hide =
-                    if self.hidden.contains(&id) { self.t("在启动器中显示", "Show in launcher") } else { self.t("从启动器隐藏", "Hide from launcher") };
+                    if self.hidden.contains(&id) { self.t(Msg::ShowInLauncher) } else { self.t(Msg::HideFromLauncher) };
                 items.push((hide.to_string(), MenuAct::ToggleHidden(id)));
             }
         }
         if !windows.is_empty() {
             let close = if windows.len() > 1 {
-                if self.zh { format!("关闭 {} 个窗口", windows.len()) } else { format!("Close {} windows", windows.len()) }
+                Count::CloseWindows.text(lang::current(), windows.len() as u64, &[])
             } else {
-                self.t("关闭窗口", "Close window").to_string()
+                self.t(Msg::CloseWindow).to_string()
             };
             items.push((close, MenuAct::CloseWindows(windows.to_vec())));
         }
@@ -2146,5 +2421,11 @@ mod tests {
         assert_eq!(QuickHit::Mac.mode(), Some("mac"));
         assert_eq!(QuickHit::Wifi.mode(), None);
         assert_eq!(QuickHit::Mute.mode(), None);
+        // Restarting the desktop is the same mechanism with the word that means "start it again":
+        // the session script then goes round its loop and exports the new LANG.
+        assert_eq!(QuickHit::RestartDesktop.mode(), Some("desktop"));
+        assert_eq!(end_session_command("desktop"), "echo desktop > /run/mode; niri msg action quit --skip-confirmation");
+        assert_eq!(QuickHit::Lang.mode(), None);
+        assert_eq!(QuickHit::LangPick(Lang::Ru).mode(), None);
     }
 }

@@ -14,6 +14,8 @@
 //!   shabnam-shell osd brightness   the same for the backlight
 //!   shabnam-shell drop on|off      switch 隔空传送 (receiving files over Wi-Fi) on or off
 //!   shabnam-shell drop show        open the quick panel, where its switch is
+//!   shabnam-shell lang zh|ru|en    switch the system language (what the language row in the
+//!                                  quick panel does): 中文, Русский or English
 //!
 //! For looking at states without touching mouse or keyboard (testing only):
 //!   shabnam-shell test-wifi                 quick panel showing the network list (starts a scan)
@@ -21,6 +23,9 @@
 //!   shabnam-shell test-menu APPID           the context menu of that app's shelf icon
 //!   shabnam-shell test-launcher-menu APPID  the launcher with the context menu of that app's entry
 //!   shabnam-shell test-drop offer|progress|done|text|refused   the 隔空传送 card with made-up content
+//!   shabnam-shell test-lang-menu            quick panel with the three language choices showing
+//!   shabnam-shell test-arm poweroff|reboot|mac|desktop   quick panel with that button asking for
+//!                                           its confirming click (which then only disarms it)
 //!
 //! This file is the Wayland side: surfaces, buffers, input routing, the control socket, the niri
 //! event stream and the clock timer. What is shown and how it reacts lives in ui.rs.
@@ -29,6 +34,7 @@ mod apps;
 mod draw;
 mod drop;
 mod icons;
+mod lang;
 mod sys;
 mod ui;
 mod wifi;
@@ -83,9 +89,9 @@ use wayland_client::{
 };
 
 const DEFAULT_PATH: &str = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin";
-const COMMANDS: [&str; 6] = ["toggle-launcher", "toggle-quick", "close", "quit", "test-wifi", "test-wifi-password"];
+const COMMANDS: [&str; 7] = ["toggle-launcher", "toggle-quick", "close", "quit", "test-wifi", "test-wifi-password", "test-lang-menu"];
 /// Commands followed by one piece of text.
-const COMMANDS_WITH_TEXT: [&str; 6] = ["search", "osd", "test-menu", "test-launcher-menu", "drop", "test-drop"];
+const COMMANDS_WITH_TEXT: [&str; 8] = ["search", "osd", "test-menu", "test-launcher-menu", "drop", "test-drop", "lang", "test-arm"];
 /// How long the volume / brightness indicator stays after the last change.
 const OSD_TIME: Duration = Duration::from_millis(1500);
 
@@ -133,7 +139,7 @@ fn main() {
             return;
         }
         _ => {
-            eprintln!("usage: shabnam-shell [{}|search TEXT|osd volume|osd brightness|drop on|drop off|drop show|test-menu APPID|test-launcher-menu APPID|test-drop KIND]", COMMANDS.join("|"));
+            eprintln!("usage: shabnam-shell [{}|search TEXT|osd volume|osd brightness|drop on|drop off|drop show|lang zh|lang ru|lang en|test-menu APPID|test-launcher-menu APPID|test-drop KIND]", COMMANDS.join("|"));
             std::process::exit(2);
         }
     }
@@ -323,6 +329,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 command if command.starts_with("test-drop ") => shell.ui.test_drop(command["test-drop ".len()..].trim()),
+                // The same call the language row's choices make.
+                command if command.starts_with("lang ") => {
+                    if let Some(language) = lang::Lang::from_code(&command["lang ".len()..]) {
+                        shell.ui.set_language(language);
+                    }
+                }
+                "test-lang-menu" => {
+                    if shell.ui.open != Some(Panel::Quick) {
+                        shell.open(Panel::Quick);
+                    }
+                    shell.ui.test_lang_menu();
+                }
+                command if command.starts_with("test-arm ") => {
+                    if shell.ui.open != Some(Panel::Quick) {
+                        shell.open(Panel::Quick);
+                    }
+                    shell.ui.test_arm(command["test-arm ".len()..].trim());
+                }
                 "close" => shell.close_panel(),
                 "quit" => shell.exit = true,
                 _ => {}

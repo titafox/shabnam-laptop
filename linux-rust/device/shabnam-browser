@@ -22,6 +22,13 @@
 #   niri option removed it; software compositing (--disable-gpu) did, but at 10 frames a second and it
 #   would rule out hardware video decoding. Source and details: mali-finish/mali-finish.c.
 #   SHABNAM_GL_FINISH=0 shabnam-browser  starts a browser without the fix, to see the difference.
+# Hardware video decoding (VA_DIR below): Chromium decodes H.264, VP8, VP9 and HEVC video on the Rockchip
+#   decoder through VA-API, with the open-source driver rockchip_drv_video.so (build: ../vaapi/build.sh). The
+#   driver sits in a directory of its own, so only this browser finds it. Measured with ../vaapi/chromium-test.sh,
+#   1080p60 H.264: 8-16 % of the frames dropped with the browser using 1.4 cores, against 43 % and 2.9 cores
+#   in software; 1080p30: 0.7 against 2.5 cores. Chromium needs no extra flags, only the three variables.
+#   10-bit video is not offered (RKVA_HIDE_10BIT) and stays on the CPU, as does AV1 (the chip has no AV1 decoder).
+#   SHABNAM_HW_VIDEO=0 shabnam-browser  starts a browser that decodes all video on the CPU.
 umask 022   # the desktop's root shell runs with umask 0; the browser's files must not be world-writable
 BROWSER_USER=shabnam
 MALI_LIBS=/opt/mali/mali:/opt/mali:/opt/mpp2/usr/lib/aarch64-linux-gnu
@@ -54,6 +61,7 @@ if [ "$(id -u)" = 0 ]; then
       LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MALI_LIBS}" \
       SHABNAM_BROWSER_FLAGS="$SHABNAM_BROWSER_FLAGS" \
       ${SHABNAM_GL_FINISH:+SHABNAM_GL_FINISH="$SHABNAM_GL_FINISH"} \
+      ${SHABNAM_HW_VIDEO:+SHABNAM_HW_VIDEO="$SHABNAM_HW_VIDEO"} \
       "$0" "$@"
 fi
 
@@ -65,6 +73,15 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MALI_LIBS}"
 # The flicker fix: Chromium's graphics process finds this libEGL.so.1 before the driver's own.
 GL_FIX=/usr/local/lib/shabnam-browser-gl
 case :$LD_LIBRARY_PATH: in *:$GL_FIX:*) ;; *) [ -r $GL_FIX/libEGL.so.1 ] && LD_LIBRARY_PATH=$GL_FIX:$LD_LIBRARY_PATH ;; esac
+# Hardware video decoding: on when the driver is installed, unless SHABNAM_HW_VIDEO=0.
+VA_DIR=/usr/local/lib/shabnam-va
+if [ "${SHABNAM_HW_VIDEO:-1}" != 0 ] && [ -r $VA_DIR/rockchip_drv_video.so ]; then
+  export LIBVA_DRIVERS_PATH=$VA_DIR LIBVA_DRIVER_NAME=rockchip RKVA_HIDE_10BIT=1
+  video=
+else
+  unset LIBVA_DRIVERS_PATH LIBVA_DRIVER_NAME
+  video=--disable-accelerated-video-decode
+fi
 exec /usr/lib/chromium/chromium \
   --ozone-platform=wayland \
   --no-sandbox \
@@ -73,4 +90,4 @@ exec /usr/lib/chromium/chromium \
   --enable-wayland-ime --wayland-text-input-version=3 \
   --password-store=basic \
   --no-first-run --no-default-browser-check \
-  $SHABNAM_BROWSER_FLAGS "$@"
+  $video $SHABNAM_BROWSER_FLAGS "$@"

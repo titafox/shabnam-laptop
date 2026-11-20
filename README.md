@@ -37,7 +37,7 @@ Mac 端的设置窗口：
 
 - **桌面**：[niri](https://github.com/YaLTeR/niri) 合成器（打了适配 Mali 驱动的补丁）加自己写的
   `shabnam-shell`：底栏、启动器、快捷设置、音量和亮度提示。外观参考 ChromeOS 的布局和 macOS 的图标风格。
-- **应用**：Chromium 浏览器、foot 终端加 fish、文件管理（yazi）、文本编辑（Helix）、硬件解码的视频播放器。
+- **应用**：Chromium 浏览器（网页视频硬件解码）、foot 终端加 fish、文件管理（yazi）、文本编辑（Helix）、硬件解码的视频播放器。
 - **中文**：Noto CJK 字体，fcitx5 拼音输入法。
 - **系统**：Wi-Fi（wpa_supplicant，可在快捷设置里切换网络）、声音（PipeWire）、
   对时（ntpd-rs）、亮度和音量键、合盖关屏、关机和重启。
@@ -138,7 +138,9 @@ cd linux-rust/mac/ShabnamDisplay && make app
 
 - **浏览器没有沙箱。** 原厂内核没有编译用户命名空间，Chromium 的沙箱无法启动。
   浏览器以一个单独的受限用户运行，与桌面（root）隔开，只共享显示和声音两个连接。
-- **浏览器里没有视频硬解。** 网页视频是软件解码，720p 流畅，1080p 会掉帧；要看 1080p 用视频播放器。
+- **浏览器里的视频硬解只覆盖 H.264 和 VP9。** 通过一个把 VA-API 接到瑞芯微解码器的开源小驱动（`rockchip-vaapi`，
+  编译脚本在 `linux-rust/vaapi/`）实现，Chromium 仍是发行版原版。1080p 30 帧基本不丢帧；60 帧丢一成左右，
+  要完全流畅请用视频播放器。AV1 和 10 位色片源芯片不支持，仍是软件解码。
 - **休眠还没做。** 合盖目前只关背光。
 - **桌面以 root 运行**，在一个 chroot 里，没有登录管理器。
 - **依赖不在仓库里的东西**：厂商的 Mali 驱动、Rockchip MPP、Void Linux 根文件系统、打过补丁的 niri。

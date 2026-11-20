@@ -5,7 +5,9 @@
 #             usr/include/va, usr/lib/libva.so.2 with a libva.so link) and the MPP headers and library
 #             (usr/include/rockchip, usr/lib/librockchip_mpp.so) from the MPP 1.5.0 the device runs (/opt/mpp2).
 #   WORK    = a scratch directory outside the repository; the source is cloned into $WORK/src.
-# Result: $WORK/rockchip_drv_video.so -> install as /usr/lib/dri/rockchip_drv_video.so on the device.
+# Result: $WORK/rockchip_drv_video.so -> install as /usr/local/lib/shabnam-va/rockchip_drv_video.so on the device
+# (root, 755). Not in libva's own directory (/usr/lib/dri): there every program would load it by itself; from
+# the private directory only shabnam-browser does (it sets LIBVA_DRIVERS_PATH; SHABNAM_HW_VIDEO=0 turns it off).
 # Source: github.com/defcom5-rockchip/rockchip-vaapi, tag v4.0.0 (LGPL-2.1), plus the *.patch files next to
 # this script, if any. Built without RGA (the Makefile's RGA=no): 8-bit frames are exported as they are, only
 # 10-bit frames would be converted on the CPU.

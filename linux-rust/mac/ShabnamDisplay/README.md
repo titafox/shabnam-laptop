@@ -86,7 +86,7 @@ settings, permission status. It contains no key material, user name, computer na
 folder path. A log is kept in `~/Library/Logs/ShabnamDisplay/` (about 1 MB per file, three old
 files); it never contains the key either.
 
-The interface is in English and Simplified Chinese.
+The interface is in English, Simplified Chinese and Russian.
 
 ### Behaviour worth knowing
 
@@ -110,7 +110,7 @@ make app          # release build + "build/Shabnam Display.app" (signed, see bel
 make run          # build and launch
 make install      # copy the app to ~/Applications
 swift test        # handshake, control channel codec and state, settings, input mapping, presets, diagnostics
-make check        # tests + every UI string present in both languages
+make check        # tests + every UI string present in every language
 ```
 
 `make app` also builds `audio-tap-probe`, a small diagnostic for the "Shabnam only" sound mode
@@ -292,7 +292,7 @@ Makefile, scripts/bundle.sh        build and bundle
 VERSION                            the app's version number
 scripts/check-strings.py           checks the string tables against the sources
 scripts/make-icon.swift            regenerates Resources/AppIcon.icns from Resources/mark.png
-Resources/                         Info.plist, icon, en / zh-Hans strings
+Resources/                         Info.plist, icon, en / zh-Hans / ru strings
 Sources/CVirtualDisplay/           header for the undocumented CoreGraphics classes
 Sources/ShabnamAudio/              system audio tap ("Shabnam only" sound mode)
 Sources/audio-tap-probe/           diagnostic for the tap

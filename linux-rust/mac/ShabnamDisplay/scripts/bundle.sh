@@ -36,7 +36,7 @@ VERSION="$(sed -n '1p' VERSION | tr -d '[:space:]')"
 BUILD="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $BUILD" "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-cp -R Resources/en.lproj Resources/zh-Hans.lproj "$APP/Contents/Resources/"
+cp -R Resources/en.lproj Resources/zh-Hans.lproj Resources/ru.lproj "$APP/Contents/Resources/"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 codesign --force --sign "$IDENTITY" --identifier org.shabnam.display "$APP"

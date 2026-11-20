@@ -29,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if CommandLine.arguments.contains("--fake-laptop") {
                 model.state = .connected(.init(framesPerSecond: 60, megabitsPerSecond: 42))
                 model.laptopControl.showFake(LaptopStatus(brightness: 63, volume: 9, volumeSteps: 16, muted: false, battery: 82, charging: true,
-                                                          externalPower: true, lidClosed: false, receiverVersion: "0.2.0", protocolVersion: 1))
+                                                          externalPower: true, lidClosed: false, receiverVersion: "0.3.0", protocolVersion: 2))
             }
             settingsWindow = SettingsWindowController(model: model)
             settingsWindow.present(preview, activate: false)
@@ -53,9 +53,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.statusItem?.showLaptop(status)
             self?.model.laptop = status
         }
+        // "Become the second screen" is pointless if this side is not looking for the laptop.
+        session.laptop.onBecomeSecondScreen = { [weak self] in
+            guard let self, let session = self.session, !session.isRunning else { return }
+            session.start()
+            self.statusItem?.show(.waiting)
+        }
         observeSystem()
         installSignalHandlers()
 
+        session.startLaptopWatch()
         if settings.autoConnect { session.start() }
         // First run, or the app's signature changed: explain what is needed instead of failing quietly.
         if !Permissions.screenRecordingGranted {

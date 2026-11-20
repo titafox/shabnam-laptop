@@ -18,6 +18,36 @@ struct LaptopStatus: Equatable {
     /// The receiver program's version, e.g. "0.2.0".
     var receiverVersion: String
     var protocolVersion: Int
+    /// The laptop is on its own desktop (its control-only receiver answered): there is no
+    /// second-screen mode to leave. Receivers before 0.3 never say so.
+    var ownDesktop = false
+    /// The panel's backlight is switched off (by the lid or on request). Revision 2.
+    var screenOff = false
+
+    /// Revision 2 of the control channel (subscreen-rx 0.3): become second screen, screen
+    /// off/on, power off, restart. An older receiver skips those messages, so they are not offered.
+    var hasModeAndPowerControls: Bool { protocolVersion >= 2 }
+}
+
+/// Ways to end the laptop's session from the Mac.
+enum LaptopPowerAction: Equatable {
+    case powerOff
+    case restart
+}
+
+/// The one mode switch on offer, depending on where the laptop is.
+enum LaptopModeSwitch: Equatable {
+    /// It is on its own desktop.
+    case becomeSecondScreen
+    /// It is showing the Mac.
+    case returnToDesktop
+
+    var title: String {
+        switch self {
+        case .becomeSecondScreen: return L("Make Shabnam the second screen")
+        case .returnToDesktop: return L("Return Shabnam to its own desktop")
+        }
+    }
 }
 
 /// Wire format of the control channel (video port + 2), see docs/PROTOCOL.md §6.
@@ -39,6 +69,12 @@ enum ControlProtocol {
         /// Leave second-screen mode: the laptop goes back to its own desktop.
         case leave
         case getStatus
+        /// Leave the laptop's own desktop for second-screen mode (revision 2).
+        case becomeSecondScreen
+        /// Backlight power; brightness stays as it is (revision 2).
+        case setScreen(on: Bool)
+        /// Power off or restart (revision 2).
+        case endSession(LaptopPowerAction)
 
         var encoded: Data {
             switch self {
@@ -47,6 +83,10 @@ enum ControlProtocol {
             case .setMute(let on): return Data([0x03, 1, on ? 1 : 0])
             case .leave: return Data([0x04, 0])
             case .getStatus: return Data([0x05, 0])
+            case .becomeSecondScreen: return Data([0x06, 0])
+            case .setScreen(let on): return Data([0x07, 1, on ? 1 : 0])
+            case .endSession(.powerOff): return Data([0x08, 1, 1])
+            case .endSession(.restart): return Data([0x08, 1, 2])
             }
         }
     }
@@ -70,7 +110,9 @@ enum ControlProtocol {
             externalPower: flags & 0x08 != 0,
             lidClosed: flags & 0x10 != 0 ? flags & 0x20 != 0 : nil,
             receiverVersion: "\(b[6]).\(b[7]).\(b[8])",
-            protocolVersion: Int(b[0]))
+            protocolVersion: Int(b[0]),
+            ownDesktop: flags & 0x40 != 0,
+            screenOff: flags & 0x80 != 0)
     }
 
     struct Oversize: Error, Equatable {}

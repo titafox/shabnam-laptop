@@ -14,13 +14,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var modeItems: [(DisplayMode, NSMenuItem)] = []
     private var audioItems: [(AudioMode, NSMenuItem)] = []
 
-    // The laptop's own controls; only in the menu while its receiver offers the control channel.
+    // The laptop's own controls; only in the menu while its receiver offers the control channel
+    // — in second-screen mode and, with subscreen-rx 0.3+, on the laptop's own desktop.
     private let laptop: LaptopControl
     private let batteryLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let brightnessItem = NSMenuItem()
     private let volumeItem = NSMenuItem()
     private let muteItem = NSMenuItem(title: L("Mute Shabnam"), action: #selector(toggleMute), keyEquivalent: "")
-    private let returnItem = NSMenuItem(title: L("Return Shabnam to its own desktop"), action: #selector(returnToDesktop), keyEquivalent: "")
+    /// One item for both directions; its title follows where the laptop is.
+    private let modeItem = NSMenuItem(title: LaptopModeSwitch.returnToDesktop.title, action: #selector(switchMode), keyEquivalent: "")
+    private let screenItem = NSMenuItem(title: L("Turn Shabnam's screen off"), action: #selector(toggleScreen), keyEquivalent: "")
+    private let powerItem = NSMenuItem(title: L("Shabnam power"), action: nil, keyEquivalent: "")
     private let laptopSeparator = NSMenuItem.separator()
     private lazy var brightnessSlider = MenuSlider(symbol: "sun.max", title: L("Shabnam brightness"), suffix: "%", target: self, action: #selector(brightnessMoved(_:)))
     private lazy var volumeSlider = MenuSlider(symbol: "speaker.wave.2", title: L("Shabnam volume"), suffix: "", target: self, action: #selector(volumeMoved(_:)))
@@ -44,7 +48,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         batteryLine.isEnabled = false
         brightnessItem.view = brightnessSlider
         volumeItem.view = volumeSlider
-        for entry in [batteryLine, brightnessItem, volumeItem, muteItem, returnItem, laptopSeparator] { menu.addItem(entry) }
+        // Power off and restart sit one level down, away from the sliders, and ask first.
+        let powerMenu = NSMenu()
+        powerMenu.addItem(NSMenuItem(title: L("Power off Shabnam…"), action: #selector(powerOffLaptop), keyEquivalent: ""))
+        powerMenu.addItem(NSMenuItem(title: L("Restart Shabnam…"), action: #selector(restartLaptop), keyEquivalent: ""))
+        powerItem.submenu = powerMenu
+        for entry in [batteryLine, brightnessItem, volumeItem, muteItem, screenItem, modeItem, powerItem, laptopSeparator] { menu.addItem(entry) }
         showLaptop(laptop.status)
 
         let sound = NSMenuItem(title: L("Sound"), action: nil, keyEquivalent: "")
@@ -74,7 +83,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: L("Settings…"), action: #selector(showSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: L("Quit Shabnam Display"), action: #selector(quit), keyEquivalent: "q"))
-        for entry in menu.items + resolutionMenu.items + soundMenu.items where entry.action != nil { entry.target = self }
+        for entry in menu.items + resolutionMenu.items + soundMenu.items + powerMenu.items where entry.action != nil { entry.target = self }
 
         item.menu = menu
         item.button?.imagePosition = .imageLeading
@@ -131,12 +140,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Battery, brightness, volume and mute as the laptop reports them; nil hides the controls.
     /// Main thread. Also called while the menu is open, so the figures stay current.
     func showLaptop(_ status: LaptopStatus?) {
-        let entries = [batteryLine, brightnessItem, volumeItem, muteItem, returnItem, laptopSeparator]
+        let entries = [batteryLine, brightnessItem, volumeItem, muteItem, screenItem, modeItem, powerItem, laptopSeparator]
         guard let status else {
             entries.forEach { $0.isHidden = true }
             return
         }
         entries.forEach { $0.isHidden = false }
+        modeItem.title = (laptop.state.modeSwitch ?? .returnToDesktop).title
+        // An older receiver knows neither of these; it would skip the messages.
+        screenItem.isHidden = !status.hasModeAndPowerControls
+        powerItem.isHidden = !status.hasModeAndPowerControls
+        screenItem.title = status.screenOff ? L("Turn Shabnam's screen on") : L("Turn Shabnam's screen off")
         batteryLine.isHidden = status.battery == nil
         batteryLine.title = status.batteryDescription ?? ""
         brightnessSlider.show(status.brightness, of: 100)
@@ -159,7 +173,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         laptop.setMuted(!status.muted)
     }
 
-    @objc private func returnToDesktop() { laptop.returnToDesktop() }
+    @objc private func switchMode() {
+        guard let offered = laptop.state.modeSwitch else { return }
+        laptop.switchMode(offered)
+    }
+
+    @objc private func toggleScreen() {
+        guard let status = laptop.status else { return }
+        laptop.setScreenOff(!status.screenOff)
+    }
+
+    @objc private func powerOffLaptop() { laptop.endSession(.powerOff, confirm: LaptopControl.confirmWithAlert) }
+    @objc private func restartLaptop() { laptop.endSession(.restart, confirm: LaptopControl.confirmWithAlert) }
 
     // MARK: actions
 

@@ -65,6 +65,47 @@ final class SessionController {
         self.settings = settings
     }
 
+    /// Looks after the laptop's controls whenever no second-screen session is up, for as long as
+    /// the app runs — also while the link is switched off with Disconnect: that is about the
+    /// second screen, and the laptop on its own desktop still has a battery and a backlight.
+    /// Call once.
+    func startLaptopWatch() {
+        let thread = Thread { [weak self] in self?.watchLaptop() }
+        thread.name = "laptop-watch"
+        thread.start()
+    }
+
+    private func standaloneControlWanted(cablePresent: Bool = true, keyPresent: Bool = true) -> Bool {
+        condition.lock(); defer { condition.unlock() }
+        return StandaloneControl.shouldConnect(sessionLinkUp: activeLink != nil, asleep: suspended, cablePresent: cablePresent, keyPresent: keyPresent)
+    }
+
+    private func watchLaptop() {
+        let offered = { [weak self] in self?.standaloneControlWanted() ?? false }
+        var complained = false
+        while true {
+            let key = PairingKey.load()
+            if standaloneControlWanted(cablePresent: CableInterface.find() != nil, keyPresent: key != nil), let key {
+                switch Link.open(host: settings.host, port: settings.port &+ ControlProtocol.portOffset, key: key, timeout: 2) {
+                case .success(let control):
+                    log("laptop control connected (no second-screen session)")
+                    complained = false
+                    laptop.serve(control, while: offered)
+                    control.close()
+                    log("laptop control connection ended")
+                case .failure(.authenticationFailed):
+                    if !complained { log("laptop control: the laptop holds a different pairing key") }
+                    complained = true
+                case .failure:
+                    break // nothing listening: second-screen mode is starting, or an older laptop system
+                }
+            }
+            condition.lock()
+            condition.wait(until: Date().addingTimeInterval(StandaloneControl.retryInterval))
+            condition.unlock()
+        }
+    }
+
     var isRunning: Bool {
         condition.lock(); defer { condition.unlock() }
         return running
@@ -129,6 +170,7 @@ final class SessionController {
         let link = activeLink
         condition.unlock()
         link?.shutdown()
+        laptop.disconnect() // also the control connection held outside a session
     }
 
     /// The Mac woke up: look for the laptop again.
@@ -238,6 +280,7 @@ final class SessionController {
             activeAudio = nil
             activeCapture = nil
             activeEncoder = nil
+            condition.broadcast() // the laptop watch may look for the control channel again
             condition.unlock()
         }
 
@@ -323,6 +366,7 @@ final class SessionController {
 
         // So does the control connection (brightness, volume, battery). A receiver without it
         // refuses the connection; that is not an error, and it is tried again now and then.
+        // It takes over from the connection the laptop watch may hold (newest wins, both ends).
         let controlPort = settings.port &+ ControlProtocol.portOffset
         let controlThread = Thread { [laptop, condition] in
             var explained = false

@@ -108,14 +108,28 @@ link is up and sound is not switched off, and re-opens it if it drops.
   once a second.
 - The receiver serves one sender at a time.
 
-## 6. Control — port 7002, both directions (revision 2)
+## 6. Control — port 7002, both directions (revision 2; control revision 2 since subscreen-rx 0.3)
 
-A third connection (video port + 2), opened by the sender while the video link is up, after the
-same handshake as the others and bound to the cable interface like them. It lets the sender
-adjust the laptop and shows it the laptop's state. It is optional and independent, like sound:
-if it is refused or drops, picture, input and sound are unaffected, and the sender tries again
-every few seconds while the video link lasts. The receiver serves one control connection; a
-newer one replaces the older.
+A third connection (video port + 2), after the same handshake as the others and bound to the
+cable interface like them. It lets the sender adjust the laptop and shows it the laptop's state.
+It is optional and independent, like sound: if it is refused or drops, picture, input and sound
+are unaffected. The receiver serves one control connection; a newer one replaces the older.
+
+The port is served in both of the laptop's modes, by one program at a time:
+
+- **Second-screen mode:** by `subscreen-rx` itself. The sender opens the connection while the
+  video link is up and tries again every few seconds while that lasts.
+- **The laptop's own desktop** (since subscreen-rx 0.3): by `subscreen-rx control`, which the
+  session script starts with the desktop and stops before second-screen mode. It opens nothing
+  but this port — no display, decoder, input device or sound device — keeps trying if the port
+  cannot be had yet, and listens afresh when the cable's network interface is re-created. Volume
+  and mute are then the desktop's sound output (PipeWire), mapped to the same 16 steps
+  (step × 100 / 16 percent, rounded), so the laptop's own volume keys show up in the status.
+  The sender, when it has no video link, tries this port every few seconds while the cable
+  network is present; when a second-screen session starts, that session's control connection
+  replaces it.
+
+Which of the two is answering is flag bit 6 of the status message.
 
 Both directions carry the same framing:
 
@@ -140,11 +154,26 @@ Rules for both ends:
 | `0x01` | set brightness | 1 byte, percent | Panel backlight, clamped to 0 – 100. The receiver never goes below 4 % of the panel's range, and does not light a panel that is switched off (lid closed). |
 | `0x02` | set volume | 1 byte, step | Speaker volume, clamped to 0 – 16 (the same 16 steps as the laptop's volume keys). Does not change mute. |
 | `0x03` | set mute | 1 byte: 1 = mute, 0 = un-mute | Any other value: ignored. |
-| `0x04` | leave | none | The receiver ends second-screen mode exactly as the laptop's Win+Esc does: it exits, all connections close, and the laptop returns to its own desktop. |
+| `0x04` | leave | none | The receiver ends second-screen mode exactly as the laptop's Win+Esc does: it exits, all connections close, and the laptop returns to its own desktop. Ignored on the laptop's own desktop. |
 | `0x05` | get status | none | A status message follows (within the rate limit below). |
+| `0x06` | become second screen | none | *Control revision 2.* On its own desktop the laptop does what its Win+Esc does there: the desktop ends and second-screen mode starts; the control connection drops and the sender connects as for any session. Ignored in second-screen mode. |
+| `0x07` | set screen | 1 byte: 1 = on, 0 = off | *Control revision 2.* Backlight power only; brightness is kept. "On" is ignored while the lid is closed. Any other value: ignored. |
+| `0x08` | end session | 1 byte: 1 = power off, 2 = restart | *Control revision 2.* The laptop shuts down or restarts the way its own power buttons do. Any other value, or no value: ignored. |
 
-These five are the only things a message can cause. The receiver acts on the type and on one
-clamped integer; no part of a message is ever used as text, a path or a program argument.
+These eight are the only things a message can cause. The receiver acts on the type and on one
+clamped integer; no part of a message is ever used as text, a path or a program argument (the
+desktop's volume is set by starting `wpctl` directly with fixed arguments and a percentage
+printed from the clamped step; mode changes write one of three fixed words for the session
+script).
+
+Guard rails on the receiver: when one read from the socket yields several commands, only the
+newest of each kind is carried out; `0x07` is carried out at most once every 0.5 s and `0x06` /
+`0x08` together at most once every 5 s (what comes sooner is dropped, not queued); each of
+`0x06`–`0x08` is written to the receiver's log.
+
+Compatibility: a receiver of control revision 1 (subscreen-rx 0.2) skips `0x06`–`0x08` as
+unknown types, so a sender must offer them only when the status says revision 2 or later; a
+sender of revision 1 never sends them and ignores the two new flag bits.
 
 ### Receiver → sender
 
@@ -154,7 +183,7 @@ clamped integer; no part of a message is ever used as text, a path or a program 
 
 | Offset | Field |
 |-------:|-------|
-| 0 | protocol revision of the control channel, currently 1 |
+| 0 | protocol revision of the control channel: 1 (subscreen-rx 0.2) or 2 (0.3) |
 | 1 | brightness, percent 0 – 100 |
 | 2 | volume, step 0 – *steps* |
 | 3 | *steps*: the number of volume steps (16); 0 makes the message void |
@@ -168,12 +197,14 @@ clamped integer; no part of a message is ever used as text, a path or a program 
 | 1 | a battery is present and byte 5 is valid |
 | 2 | the battery is charging |
 | 3 | external power is connected (charging, or full) |
-| 4 | the lid state is known (the sensor has reported since the receiver started) |
+| 4 | the lid state is known (in second-screen mode: the sensor has reported since the receiver started) |
 | 5 | the lid is closed (meaningful only with bit 4) |
-| 6, 7 | reserved, 0 |
+| 6 | *control revision 2:* the laptop is on its own desktop (the control-only receiver is answering); 0 in second-screen mode |
+| 7 | *control revision 2:* the screen (backlight) is switched off |
 
 The receiver sends a status once when the connection is established, then whenever any field
-changes — including brightness, volume and mute changed with the laptop's own keys — and when
+changes — including brightness, volume, mute and screen changed on the laptop itself (on its own
+desktop the sound output is looked at about once a second while a sender is connected) — and when
 asked with `0x05`; in every case **at most one status a second**. The sender should therefore
 show a value the user has just set at once, and not let a status that was already on its way
 move the control back (the app holds a user-set value for 2 s or until the receiver confirms

@@ -38,6 +38,27 @@ light() {  # the kernel keeps the backlight off until the framebuffer is unblank
 }
 # The start-up picture owns the screen until the first real program is about to take it.
 end_splash() { for p in $(pidof shabnam-splash); do kill $p; done; }
+# The Mac app's controls (battery, brightness, volume, screen, power) while this laptop is on its
+# own desktop: the second-screen receiver's control port alone, on the cable only. It retries by
+# itself until the cable's network port exists and follows it when it is re-created. Second-screen
+# mode serves the same port itself, so this one is stopped first — and waited for.
+CTL=/run/shabnam-control.pid
+control_running() {
+  ctl=$(cat $CTL 2>/dev/null) && [ -n "$ctl" ] &&
+    case "$(tr '\0' ' ' < /proc/$ctl/cmdline 2>/dev/null)" in *"subscreen-rx control"*) true ;; *) false ;; esac
+}
+control_start() {
+  control_running && return
+  subscreen-rx control >/var/log/shabnam/control.log 2>&1 &
+  echo $! > $CTL
+}
+control_stop() {
+  if control_running; then
+    kill "$ctl" 2>/dev/null; wait "$ctl" 2>/dev/null
+    n=0; while [ -d /proc/$ctl ] && [ $n -lt 30 ]; do sleep 0.1; n=$((n+1)); done  # not our child: left by an earlier run
+  fi
+  rm -f $CTL
+}
 shabnam-timesync start >/var/log/shabnam/timesync.log 2>&1   # network time (ntpd-rs)
 shabnam-lid start >/var/log/shabnam/lid.log 2>&1             # lid closed = backlight off
 echo desktop > /run/mode
@@ -48,14 +69,19 @@ while true; do
   if [ "$(cat /run/mode)" = mac ]; then
     end_splash
     shabnam-audio stop >/dev/null 2>&1   # the second-screen receiver plays sound itself
+    control_stop
     subscreen-rx >/var/log/shabnam/rx.log 2>&1
+    # The Mac app can ask for power off or restart from here too (control channel).
+    case "$(cat /run/mode)" in poweroff|reboot) sync; exit 0 ;; esac
     echo desktop > /run/mode
   else
     end_splash
     shabnam-audio start >/var/log/shabnam/audio.log 2>&1
+    control_start
     niri-mali -c /root/niri.kdl >/var/log/shabnam/niri.log 2>&1
     # The quick panel's power buttons leave a word here and end the desktop.
-    case "$(cat /run/mode)" in poweroff|reboot) shabnam-audio stop >/dev/null 2>&1; sync; exit 0 ;; esac
+    # (Or the Mac app asked for the same over the control channel.)
+    case "$(cat /run/mode)" in poweroff|reboot) control_stop; shabnam-audio stop >/dev/null 2>&1; sync; exit 0 ;; esac
   fi
   # Something that dies immediately, over and over, is broken: stop instead of spinning.
   if [ $(( $(date +%s) - start )) -lt 5 ]; then fails=$((fails+1)); else fails=0; fi

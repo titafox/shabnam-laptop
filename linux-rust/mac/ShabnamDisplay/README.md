@@ -49,8 +49,10 @@ The menu is short on purpose:
 |------|--------------|
 | Status line | `Waiting for laptop`, `Connected · 1080p · 60 fps · 42 Mbit/s`, or `Error: …` |
 | Connect / Disconnect | Stop or resume looking for the laptop, for this run |
-| Laptop battery, brightness, volume, mute | The laptop's own state and controls, e.g. `Shabnam 82% · charging` — shown while connected to a laptop whose receiver offers the control channel (subscreen-rx 0.2+) |
-| Return Shabnam to its own desktop | Ends second-screen mode on the laptop, as its Win+Esc does |
+| Laptop battery, brightness, volume, mute | The laptop's own state and controls, e.g. `Shabnam 82% · charging` — shown whenever the cable is in and the laptop offers the control channel: in second-screen mode (subscreen-rx 0.2+) and, with subscreen-rx 0.3+, while the laptop is on its own desktop (volume and mute are then the desktop's) |
+| Turn Shabnam's screen off / on | Backlight only; refused while the lid is closed (subscreen-rx 0.3+) |
+| Make Shabnam the second screen / Return Shabnam to its own desktop | One item whose label follows the laptop's mode; both do what the laptop's Win+Esc does. "Make … the second screen" also starts connecting if the link was switched off |
+| Shabnam power ▸ Power off… / Restart… | Asks first (subscreen-rx 0.3+) |
 | Sound | Where the Mac's sound is heard — see [Sound modes](#sound-modes) |
 | Resolution | How large the desktop appears on the laptop |
 | Settings… (⌘,) | Everything else |
@@ -61,7 +63,7 @@ in the app's defaults domain.
 | Pane | Contents |
 |------|----------|
 | General | Launch at login · connect automatically · icon only or icon and bitrate in the menu bar · notifications on connect/disconnect (off by default) |
-| Display | Shabnam laptop: battery, brightness, volume, mute, return to its own desktop (greyed out without the control channel) · Resolution: 1920 × 1080 HiDPI (default), 1920 × 1080, 1600 × 900 HiDPI, 1280 × 720 HiDPI · frame rate cap 60/30 · picture quality · show the Mac's pointer · Arrange Displays… |
+| Display | Shabnam laptop: battery, brightness, volume, mute, screen on/off, second screen ⇄ own desktop, power off / restart (greyed out without the control channel) · Resolution: 1920 × 1080 HiDPI (default), 1920 × 1080, 1600 × 900 HiDPI, 1280 × 720 HiDPI · frame rate cap 60/30 · picture quality · show the Mac's pointer · Arrange Displays… |
 | Sound | The three [sound modes](#sound-modes) |
 | Input | Accept the laptop's keyboard and touchpad (off: events are read and discarded) · Win/Alt mapping · media keys · pointer speed · scroll speed · reverse scroll direction |
 | Connection | Laptop address and port · the cable interface in use · pairing key (reveal, import, generate) · live statistics · Copy Diagnostics |
@@ -320,8 +322,12 @@ docs/PROTOCOL.md                   wire format
 - A paired laptop can type and click on the Mac — that is the feature. Treat the key file like
   a password.
 - The control channel uses the same handshake and the same cable-only sockets. What the Mac can
-  make the laptop do is a fixed list — backlight, volume, mute, leave second-screen mode — each
-  carrying at most one clamped number.
+  make the laptop do is a fixed list — backlight, volume, mute, screen off/on, switch between
+  second-screen mode and its own desktop, power off, restart — each carrying at most one
+  clamped number. Power off and restart are sent only after a confirmation dialog.
+- Outside a second-screen session the app looks for the control port every few seconds, only
+  while the cable network is present and never while the Mac sleeps; Disconnect does not stop
+  this (it is about the second screen).
 
 ## Licence
 

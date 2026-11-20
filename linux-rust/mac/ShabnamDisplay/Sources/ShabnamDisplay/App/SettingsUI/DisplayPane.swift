@@ -57,18 +57,31 @@ extension DisplayPane {
                 Image(systemName: "speaker.wave.3")
             }
             Toggle(L("Mute Shabnam"), isOn: Binding(get: { laptop?.muted ?? false }, set: { control.setMuted($0) }))
+            if laptop?.hasModeAndPowerControls == true {
+                Toggle(L("Shabnam's screen on"), isOn: Binding(get: { !(laptop?.screenOff ?? false) }, set: { control.setScreenOff(!$0) }))
+            }
             HStack {
-                Button(L("Return Shabnam to its own desktop")) { control.returnToDesktop() }
+                // One button for both directions; its label follows where the laptop is.
+                let offered = control.state.modeSwitch ?? .returnToDesktop
+                Button(offered.title) { control.switchMode(offered) }
+                if laptop?.hasModeAndPowerControls == true {
+                    Menu(L("Shabnam power")) {
+                        Button(L("Power off Shabnam…")) { control.endSession(.powerOff, confirm: LaptopControl.confirmWithAlert) }
+                        Button(L("Restart Shabnam…")) { control.endSession(.restart, confirm: LaptopControl.confirmWithAlert) }
+                    }
+                    .fixedSize()
+                }
                 Spacer()
                 if let laptop {
-                    Text(L("Receiver %@", laptop.receiverVersion) + (laptop.lidClosed == true ? " · " + L("lid closed") : ""))
+                    Text((laptop.ownDesktop ? L("On its own desktop") + " · " : "") + L("Receiver %@", laptop.receiverVersion)
+                         + (laptop.lidClosed == true ? " · " + L("lid closed") : ""))
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }
             if laptop == nil {
                 Note(model.state.isConnected
                     ? L("This laptop's receiver does not offer these controls yet; it needs a newer subscreen-rx.")
-                    : L("Available while the laptop is connected as a second screen."))
+                    : L("Available while the laptop is connected with the cable."))
             } else {
                 Note(L("The laptop's own brightness and volume keys keep working; changes made there show up here."))
             }

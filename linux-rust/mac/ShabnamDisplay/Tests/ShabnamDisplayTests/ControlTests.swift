@@ -209,6 +209,143 @@ final class ControlTests: XCTestCase {
         XCTAssertEqual(control.status?.muted, false)
     }
 
+    // MARK: revision 2 — own desktop, screen, power
+
+    func testRevisionTwoCommandsEncode() {
+        // The same bytes the receiver's test feeds its parser (proto.rs, revision_two_commands_from_the_wire).
+        XCTAssertEqual([UInt8](ControlProtocol.Command.becomeSecondScreen.encoded), [0x06, 0])
+        XCTAssertEqual([UInt8](ControlProtocol.Command.setScreen(on: false).encoded), [0x07, 1, 0])
+        XCTAssertEqual([UInt8](ControlProtocol.Command.setScreen(on: true).encoded), [0x07, 1, 1])
+        XCTAssertEqual([UInt8](ControlProtocol.Command.endSession(.powerOff).encoded), [0x08, 1, 1])
+        XCTAssertEqual([UInt8](ControlProtocol.Command.endSession(.restart).encoded), [0x08, 1, 2])
+    }
+
+    func testOwnDesktopAndScreenFlagsDecode() {
+        var bytes = Array(sampleBytes.dropFirst(2))
+        XCTAssertEqual(ControlProtocol.decodeStatus(type: 0x81, payload: Data(bytes))?.ownDesktop, false)
+        XCTAssertEqual(ControlProtocol.decodeStatus(type: 0x81, payload: Data(bytes))?.screenOff, false)
+        bytes[0] = 2
+        bytes[4] |= 0x40
+        let desktop = ControlProtocol.decodeStatus(type: 0x81, payload: Data(bytes))
+        XCTAssertEqual(desktop?.ownDesktop, true)
+        XCTAssertEqual(desktop?.screenOff, false)
+        XCTAssertEqual(desktop?.hasModeAndPowerControls, true)
+        bytes[4] = 0x80
+        let dark = ControlProtocol.decodeStatus(type: 0x81, payload: Data(bytes))
+        XCTAssertEqual(dark?.screenOff, true)
+        XCTAssertEqual(dark?.ownDesktop, false)
+        XCTAssertEqual(dark?.muted, false)
+    }
+
+    private let t0 = Date(timeIntervalSince1970: 100)
+
+    private func reported(ownDesktop: Bool, revision: Int = 2, screenOff: Bool = false) -> LaptopControlState {
+        var status = sample
+        status.ownDesktop = ownDesktop
+        status.protocolVersion = revision
+        status.screenOff = screenOff
+        var state = LaptopControlState()
+        state.received(status, at: t0)
+        return state
+    }
+
+    func testTheModeSwitchFollowsWhereTheLaptopIs() {
+        XCTAssertNil(LaptopControlState().modeSwitch) // no channel: nothing on offer
+        XCTAssertNil(LaptopControlState().modeCommand(.returnToDesktop))
+        XCTAssertNil(LaptopControlState().modeCommand(.becomeSecondScreen))
+
+        let second = reported(ownDesktop: false)
+        XCTAssertEqual(second.modeSwitch, .returnToDesktop)
+        XCTAssertEqual(second.modeCommand(.returnToDesktop), .leave)
+        XCTAssertNil(second.modeCommand(.becomeSecondScreen)) // a stale click after the mode changed
+
+        let desktop = reported(ownDesktop: true)
+        XCTAssertEqual(desktop.modeSwitch, .becomeSecondScreen)
+        XCTAssertEqual(desktop.modeCommand(.becomeSecondScreen), .becomeSecondScreen)
+        XCTAssertNil(desktop.modeCommand(.returnToDesktop))
+
+        XCTAssertEqual(LaptopModeSwitch.returnToDesktop.title, "Return Shabnam to its own desktop")
+        XCTAssertEqual(LaptopModeSwitch.becomeSecondScreen.title, "Make Shabnam the second screen")
+        // A receiver of revision 1 only knows second-screen mode and "leave".
+        XCTAssertEqual(reported(ownDesktop: false, revision: 1).modeSwitch, .returnToDesktop)
+    }
+
+    func testPowerNeedsConfirmationAndARevisionTwoReceiver() {
+        let state = reported(ownDesktop: true)
+        XCTAssertNil(state.powerCommand(.powerOff, confirmed: false))
+        XCTAssertNil(state.powerCommand(.restart, confirmed: false))
+        XCTAssertEqual(state.powerCommand(.powerOff, confirmed: true), .endSession(.powerOff))
+        XCTAssertEqual(state.powerCommand(.restart, confirmed: true), .endSession(.restart))
+        XCTAssertEqual(reported(ownDesktop: false).powerCommand(.restart, confirmed: true), .endSession(.restart))
+        // Not to an older receiver, and not without a channel — whatever the dialog said.
+        XCTAssertNil(reported(ownDesktop: false, revision: 1).powerCommand(.powerOff, confirmed: true))
+        XCTAssertNil(LaptopControlState().powerCommand(.powerOff, confirmed: true))
+    }
+
+    func testTheConfirmationIsAskedAndObeyed() {
+        let control = LaptopControl()
+        var asked: [LaptopPowerAction] = []
+        control.endSession(.powerOff) { asked.append($0); return false }
+        XCTAssertTrue(asked.isEmpty) // no channel: not even asked
+        var old = sample
+        old.protocolVersion = 1
+        control.showFake(old)
+        control.endSession(.powerOff) { asked.append($0); return true }
+        XCTAssertTrue(asked.isEmpty) // an older receiver: not offered, not asked
+        var new = sample
+        new.protocolVersion = 2
+        control.showFake(new)
+        control.endSession(.restart) { asked.append($0); return false }
+        control.endSession(.powerOff) { asked.append($0); return true }
+        XCTAssertEqual(asked, [.restart, .powerOff])
+    }
+
+    func testBecomingTheSecondScreenTellsTheApp() {
+        let control = LaptopControl()
+        var told = 0
+        control.onBecomeSecondScreen = { told += 1 }
+        control.switchMode(.becomeSecondScreen) // no channel
+        var status = sample
+        status.protocolVersion = 2
+        control.showFake(status) // second-screen mode: only "return" is on offer
+        control.switchMode(.becomeSecondScreen)
+        control.switchMode(.returnToDesktop)
+        XCTAssertEqual(told, 0)
+        status.ownDesktop = true
+        control.showFake(status)
+        control.switchMode(.returnToDesktop) // stale
+        XCTAssertEqual(told, 0)
+        control.switchMode(.becomeSecondScreen)
+        XCTAssertEqual(told, 1)
+    }
+
+    func testScreenSwitch() {
+        var state = reported(ownDesktop: true)
+        XCTAssertNil(state.setScreenOff(false)) // already on
+        XCTAssertEqual(state.setScreenOff(true, at: t0), .setScreen(on: false))
+        XCTAssertEqual(state.status?.screenOff, true) // shown at once
+        // A report that was already on its way does not flip it back during the hold.
+        var stale = state.status!
+        stale.screenOff = false
+        state.received(stale, at: t0.addingTimeInterval(0.5))
+        XCTAssertEqual(state.status?.screenOff, true)
+        // After the hold the laptop's word counts (the lid was closed and "on" was refused, say).
+        state.received(stale, at: t0.addingTimeInterval(LaptopControlState.holdTime + 3))
+        XCTAssertEqual(state.status?.screenOff, false)
+        var older = reported(ownDesktop: false, revision: 1)
+        XCTAssertNil(older.setScreenOff(true)) // an older receiver has no such switch
+        XCTAssertFalse(older.offersScreenAndPower)
+    }
+
+    func testStandaloneControlPolicy() {
+        XCTAssertTrue(StandaloneControl.shouldConnect(sessionLinkUp: false, asleep: false, cablePresent: true, keyPresent: true))
+        XCTAssertFalse(StandaloneControl.shouldConnect(sessionLinkUp: true, asleep: false, cablePresent: true, keyPresent: true))
+        XCTAssertFalse(StandaloneControl.shouldConnect(sessionLinkUp: false, asleep: true, cablePresent: true, keyPresent: true))
+        XCTAssertFalse(StandaloneControl.shouldConnect(sessionLinkUp: false, asleep: false, cablePresent: false, keyPresent: true))
+        XCTAssertFalse(StandaloneControl.shouldConnect(sessionLinkUp: false, asleep: false, cablePresent: true, keyPresent: false))
+        XCTAssertGreaterThanOrEqual(StandaloneControl.retryInterval, 3)
+    }
+
     // MARK: wording
 
     func testBatteryWording() {
@@ -230,7 +367,7 @@ final class ControlTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = Settings(defaults: defaults)
         let with = Diagnostics.report(state: .waiting, stats: .init(), settings: settings, cable: nil, laptop: sample)
-        XCTAssertTrue(with.contains("laptop control: receiver 0.2.0, protocol 1, brightness 63%, volume 9/16 muted, battery 82% charging, lid open"))
+        XCTAssertTrue(with.contains("laptop control: second screen, receiver 0.2.0, protocol 1, brightness 63%, volume 9/16 muted, battery 82% charging, lid open, screen on"))
         XCTAssertTrue(Diagnostics.report(state: .waiting, stats: .init(), settings: settings, cable: nil).contains("laptop control: not available"))
     }
 }

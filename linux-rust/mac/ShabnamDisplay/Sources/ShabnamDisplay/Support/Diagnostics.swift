@@ -34,7 +34,7 @@ enum Diagnostics {
         if let laptop {
             let battery = laptop.battery.map { "\($0)%\(laptop.charging ? " charging" : laptop.externalPower ? " on charger" : "")" } ?? "none"
             let lid = laptop.lidClosed.map { $0 ? "closed" : "open" } ?? "unknown"
-            lines.append("laptop control: receiver \(laptop.receiverVersion), protocol \(laptop.protocolVersion), brightness \(laptop.brightness)%, volume \(laptop.volume)/\(laptop.volumeSteps)\(laptop.muted ? " muted" : ""), battery \(battery), lid \(lid)")
+            lines.append("laptop control: \(laptop.ownDesktop ? "own desktop" : "second screen"), receiver \(laptop.receiverVersion), protocol \(laptop.protocolVersion), brightness \(laptop.brightness)%, volume \(laptop.volume)/\(laptop.volumeSteps)\(laptop.muted ? " muted" : ""), battery \(battery), lid \(lid), screen \(laptop.screenOff ? "off" : "on")")
         } else {
             lines.append("laptop control: not available")
         }

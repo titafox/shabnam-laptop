@@ -1,6 +1,6 @@
 [package]
 name = "subscreen-rx"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Second-screen receiver for the EC-NB01-CE: TCP H.264/H.265 -> Rockchip hardware decoder -> DRM plane"
 

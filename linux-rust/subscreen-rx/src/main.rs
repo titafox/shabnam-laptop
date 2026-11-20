@@ -4,11 +4,14 @@
 //! The laptop's keyboard and touchpad events travel back to the sender on the same connection.
 //!
 //! A third port lets the sender adjust backlight and volume and read the battery (control.rs).
+//! `subscreen-rx control` serves that port alone, for the time the laptop is on its own desktop:
+//! it opens no display, decoder, input device or sound device (desktop.rs).
 //!
-//! usage: subscreen-rx [--bind 169.254.1.1] [--iface usb0] [--port 7000] [--key /root/subscreen.key] [--hevc] [--connector 348] [--crtc 87] [--plane 229] [--primary 73]
+//! usage: subscreen-rx [control] [--bind 169.254.1.1] [--iface usb0] [--port 7000] [--key /root/subscreen.key] [--hevc] [--connector 348] [--crtc 87] [--plane 229] [--primary 73]
 mod audio;
 mod auth;
 mod control;
+mod desktop;
 mod drm;
 mod input;
 mod mpp;
@@ -55,8 +58,31 @@ fn new_decoder(coding: u32) -> Dec {
     }
 }
 
+/// A listening socket on the cable: bound to the cable's address and tied to its interface.
+/// Binding to the address alone is not enough: Linux answers for any of its addresses on any
+/// interface, so a machine on the Wi-Fi could still reach these ports by routing to them — and
+/// whoever connects receives the keyboard. A listener that could not be tied to the cable is not
+/// used at all.
+fn listen_on_cable(bind: &str, iface: &str, port: u16) -> std::io::Result<TcpListener> {
+    let l = TcpListener::bind((bind, port))?;
+    let r = unsafe {
+        use std::os::fd::AsRawFd;
+        libc::setsockopt(l.as_raw_fd(), libc::SOL_SOCKET, libc::SO_BINDTODEVICE, iface.as_ptr() as *const c_void, iface.len() as u32)
+    };
+    if r != 0 { return Err(std::io::Error::last_os_error()); }
+    Ok(l)
+}
+
+fn text_arg(name: &str, default: &str) -> String {
+    let a: Vec<String> = std::env::args().collect();
+    a.iter().position(|x| x == name).and_then(|i| a.get(i + 1)).cloned().unwrap_or_else(|| default.into())
+}
+
 fn main() {
     let port = arg("--port", 7000);
+    if std::env::args().nth(1).as_deref() == Some("control") {
+        desktop::run(&text_arg("--bind", "169.254.1.1"), &text_arg("--iface", "usb0"), port as u16 + 2, &text_arg("--key", "/root/subscreen.key"));
+    }
     let coding = if std::env::args().any(|a| a == "--hevc") { mpp::CODING_HEVC } else { mpp::CODING_AVC };
     let primary = arg("--primary", 73);
     let mut card = drm::Card::open("/dev/dri/card0", arg("--connector", 348), arg("--crtc", 87), arg("--plane", 229))
@@ -65,27 +91,12 @@ fn main() {
 
     // Listen only on the USB cable's address: anything that connects can draw on the screen and
     // feed the decoder, so the Wi-Fi side must not be able to reach this port.
-    let args: Vec<String> = std::env::args().collect();
-    let bind = args.iter().position(|x| x == "--bind").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "169.254.1.1".into());
-    // Binding to the address alone is not enough: Linux answers for any of its addresses on any
-    // interface, so a machine on the Wi-Fi could still reach these ports by routing to them — and
-    // whoever connects receives the keyboard. Tie the sockets to the USB network interface itself.
-    let iface = args.iter().position(|x| x == "--iface").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "usb0".into());
-    let try_listen = |port: u16| -> std::io::Result<TcpListener> {
-        let l = TcpListener::bind((bind.as_str(), port))?;
-        let r = unsafe {
-            use std::os::fd::AsRawFd;
-            libc::setsockopt(l.as_raw_fd(), libc::SOL_SOCKET, libc::SO_BINDTODEVICE, iface.as_ptr() as *const c_void, iface.len() as u32)
-        };
-        // A listener that could not be tied to the cable is not used at all.
-        if r != 0 { return Err(std::io::Error::last_os_error()); }
-        Ok(l)
-    };
+    let (bind, iface) = (text_arg("--bind", "169.254.1.1"), text_arg("--iface", "usb0"));
+    let try_listen = |port: u16| listen_on_cable(&bind, &iface, port);
     let listen = |port: u16| try_listen(port).unwrap_or_else(|e| panic!("cannot listen on {bind}:{port}, restricted to interface {iface}: {e}"));
     let listener = listen(port as u16);
     let sound = listen(port as u16 + 1);
-    let key_path = args.iter().position(|x| x == "--key").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "/root/subscreen.key".into());
-    let key = auth::load_key(&key_path);
+    let key = auth::load_key(&text_arg("--key", "/root/subscreen.key"));
     let sound_key = key.clone();
     std::thread::spawn(move || audio::serve(sound, &sound_key));
     eprintln!("listening on {bind}:{port} (video, input) and :{} (sound), {iface} only", port + 1);
@@ -93,7 +104,7 @@ fn main() {
     match try_listen(port as u16 + 2) {
         Ok(l) => {
             let control_key = key.clone();
-            std::thread::spawn(move || control::serve(l, control_key));
+            std::thread::spawn(move || control::serve(l, control_key, &control::SecondScreen, || false));
             eprintln!("listening on :{} (control), {iface} only", port + 2);
         }
         Err(e) => eprintln!("control channel unavailable: {e}"),

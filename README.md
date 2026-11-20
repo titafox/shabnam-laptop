@@ -67,6 +67,100 @@ Mac 端的设置窗口：
 
 安全措施：存在 `/data/void-boot/disabled` 时回到安卓；上一次启动没有成功的话，下一次自动回到安卓。
 
+## 安装到一台新机器
+
+下面从「`adb` 已经能连上这台机器、`adb root` 能拿到 `uid=0`」讲起。怎么从锁死状态开出网络
+adb、拿到 root（人工约 5 分钟，零内核漏洞，不刷机），见仓库根目录的
+《EC-NB01-最短路径教程.md》第一部分。
+
+安装需要的两样东西在本仓库的 [Releases](../../releases/latest) 里，都已去除密钥和个人数据：
+
+| 文件 | 内容 |
+|---|---|
+| `shabnam-rootfs-<日期>.tar.gz` | 装好的 Void 系统整包（约 1.5 GB，解开约 4.5 GB）：打过补丁的 niri、桌面外壳、全部应用，以及厂商的 Mali / Rockchip MPP 库 |
+| `ShabnamDisplay-<版本>-mac.zip` | Mac 端副屏应用（Apple Silicon） |
+
+> 下面有写入 `/vendor` 和替换启动流程的步骤。这款机器没有可用的刷机通道，
+> **动手前务必先做第 1 步的备份、并实测 fastboot 救砖通道可用**。
+
+### 1. 备份与救砖通道（动分区前必做）
+
+```sh
+# 充电口侧（port0）接 Mac
+adb pull /dev/block/by-name/boot   boot.img
+adb pull /dev/block/by-name/vendor vendor.img   # 第 2 步会改 vendor
+# 拉取前后各算一次 sha256，必须一致
+
+adb reboot bootloader
+fastboot devices               # 必须列出设备，否则不要继续
+fastboot flash boot boot.img   # 把刚备份的写回，验证通道可用
+fastboot reboot
+```
+
+两条铁律：永远不用 `fastboot getvar all`（会卡死机器）；`reboot bootloader` 后先确认
+`fastboot devices` 在线，再做任何不可逆操作。
+
+### 2. USB 外设模式（副屏和高速传输靠它）
+
+原厂内核的 USB 控制器只有主机模式。几个为原厂内核编译、CRC 已核对的内核模块在 `kmod/`：
+
+```sh
+adb push kmod/dwc3_gadget_otg.ko kmod/usb_f_ncm.ko kmod/usb_f_ecm.ko /vendor/lib/modules/
+adb push kmod/device-files/usb-gadget.sh  /vendor/bin/
+adb push kmod/device-files/usb-gadget.rc  /vendor/etc/init/
+adb reboot
+```
+
+之后用 port0 接 Mac，会多出一个 USB adb 接口（约 33 MB/s，Wi-Fi 只有 1.5）。
+
+### 3. 装系统
+
+```sh
+# 先对照 Release 页上的校验值
+shasum -a 256 shabnam-rootfs-<日期>.tar.gz
+
+# 推到设备，用设备自带的 gzip 解开到 /data/void
+adb push shabnam-rootfs-<日期>.tar.gz /data/local/tmp/
+adb shell 'su 0 sh -c "mkdir -p /data/void && cd /data/void && \
+  gzip -dc /data/local/tmp/shabnam-rootfs-<日期>.tar.gz | tar x && sync"'
+
+# 放启动脚本与会话脚本（session.sh 已在整包里的 /root 下）
+adb push linux-rust/device/void.sh              /data/void.sh
+adb push linux-rust/device/boot/boot.sh         /data/void-boot/boot.sh
+adb push linux-rust/device/usb-net.sh           /data/void-boot/usb-net.sh
+adb push linux-rust/device/boot/void-desktop.rc /vendor/etc/init/
+adb shell 'su 0 sh -c "chmod 755 /data/void.sh /data/void-boot/*.sh; \
+  rm -f /data/local/tmp/shabnam-rootfs-*.tar.gz"'
+```
+
+整包里不含 Wi-Fi 配置。建一个空的配置骨架，网络进桌面后在快捷设置里连：
+
+```sh
+adb shell 'su 0 sh -c "mkdir -p /data/void/etc/wpa_supplicant && \
+  printf \"ctrl_interface=/run/wpa_supplicant\nupdate_config=1\n\" \
+  > /data/void/etc/wpa_supplicant/wpa_supplicant-wlan0.conf && \
+  chmod 600 /data/void/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"'
+```
+
+### 4. 重启进入桌面
+
+```sh
+adb reboot
+```
+
+重启后不再进安卓，直接进 Shabnam 桌面。第一次进去按 `Win+S` 打开快捷设置连 Wi-Fi。
+
+出问题时的安全网：`adb shell 'su 0 touch /data/void-boot/disabled'` 再重启，即回到安卓
+（原系统分文未动）；上一次没启动成功，下一次也会自动回到安卓。
+
+### 5. Mac 副屏端
+
+解开 `ShabnamDisplay-<版本>-mac.zip`，把 `Shabnam Display.app` 拖进「应用程序」。应用未经
+公证，第一次打开时按住 Control 点图标选「打开」。线缆接 port0，笔记本按 `Win+Esc` 进入副屏。
+
+副屏连接用预共享密钥双向认证；密钥不在整包里，需要在笔记本的 `/root/subscreen.key` 与 Mac 的
+`~/.config/subscreen/key` 各放同一份（两端内容一致即可）。
+
 ## 目录
 
 | 路径 | 内容 |
@@ -144,7 +238,8 @@ cd linux-rust/mac/ShabnamDisplay && make app
   要完全流畅请用视频播放器。AV1 和 10 位色片源芯片不支持，仍是软件解码。
 - **休眠还没做。** 合盖目前只关背光。
 - **桌面以 root 运行**，在一个 chroot 里，没有登录管理器。
-- **依赖不在仓库里的东西**：厂商的 Mali 驱动、Rockchip MPP、Void Linux 根文件系统、打过补丁的 niri。
+- **依赖不在仓库里的东西**：厂商的 Mali 驱动、Rockchip MPP、Void Linux 根文件系统、打过补丁的 niri——
+  这些都打包在 [Release](../../releases/latest) 的系统整包里，仓库里是对应的源码构建脚本和补丁。
 - **Mac 端用了私有接口**（`CGVirtualDisplay`）创建虚拟显示器，不能上架 App Store。
 - GPU 绘制的终端（Alacritty、WezTerm）在这个显卡驱动上无法工作，所以用了处理器绘制的 foot。
 

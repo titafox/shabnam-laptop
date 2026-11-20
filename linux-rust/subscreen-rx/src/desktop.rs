@@ -121,11 +121,14 @@ fn end_desktop(word: &'static str) {
         return;
     };
     if !control::write_mode(word) { return; }
-    let asked = Command::new("niri").args(["msg", "action", "quit", "--skip-confirmation"])
-        .env("NIRI_SOCKET", socket).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-        .status().is_ok_and(|s| s.success());
-    if !asked {
-        eprintln!("control: niri could not be asked to quit — staying on the desktop");
+    // niri closes its socket as it quits, often before it has answered, so the command reports
+    // a failure for a request that worked. What counts is whether niri is still there.
+    let _ = Command::new("niri").args(["msg", "action", "quit", "--skip-confirmation"])
+        .env("NIRI_SOCKET", &socket).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .status();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    if std::os::unix::net::UnixStream::connect(&socket).is_ok() {
+        eprintln!("control: niri did not quit — staying on the desktop");
         control::write_mode("desktop");
     }
 }

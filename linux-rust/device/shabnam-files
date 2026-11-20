@@ -12,6 +12,18 @@
 # Opening a file: Favnyr hands it to xdg-open, which looks the type up in /etc/xdg/mimeapps.list
 # (../device/etc/xdg-mimeapps.list) and the .desktop files' MimeType lines; nothing is hard-coded here.
 umask 022
+# Who it runs as: the same unprivileged user as the browser, the player and the other applications
+# (shabnam-userapp), with that user's home. So the files it shows are the files those programs can
+# open, a double-click cannot start anything as root, and nothing the desktop's root owns is in reach.
+if [ "$(id -u)" = 0 ]; then
+  # A video opened from here starts shabnam-player as that user, which cannot arrange its own way
+  # to the sound server: make the same link shabnam-player makes when root starts it.
+  pulse=${XDG_RUNTIME_DIR:-/run/user0}/pulse/native
+  mkdir -p /run/shabnam-share && chown root:shabnam /run/shabnam-share && chmod 750 /run/shabnam-share &&
+    [ -S "$pulse" ] && chgrp shabnam "$pulse" && chmod 660 "$pulse" && ln -f "$pulse" /run/shabnam-share/pulse-native
+  SHABNAM_APP_ENV="SLINT_BACKEND=${SHABNAM_FILES_BACKEND:-winit-software} $SHABNAM_APP_ENV" \
+    exec shabnam-userapp /usr/local/bin/shabnam-files "$@"
+fi
 export SLINT_BACKEND="${SHABNAM_FILES_BACKEND:-winit-software}"
 # Language: Favnyr has its own setting (language = "zh" | "ru" | "en" | de es fr it ja in config.toml, changed
 # in its Settings) and reads neither LANG nor a command-line option. So on every start the system language
@@ -35,4 +47,5 @@ if [ -n "$lang" ]; then
       END { if (!done) print line }' "$cfg" > "$cfg.new" && [ -s "$cfg.new" ] && mv "$cfg.new" "$cfg" || rm -f "$cfg.new"
   fi
 fi
+[ $# -gt 0 ] || set -- "${HOME:-/}"
 exec favnyr "$@"

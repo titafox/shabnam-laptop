@@ -32,7 +32,7 @@ if [ "$(id -u)" = 0 ]; then
     # No file given (started from the launcher): open the file manager in the Videos folder. A double
     # click on a video there comes back here as "shabnam-player FILE" through the file association
     # (/etc/xdg/mimeapps.list and shabnam-player.desktop's MimeType line).
-    dir=${HOME:-/root}; [ -d "$dir/Videos" ] && dir=$dir/Videos
+    dir=$(getent passwd "$PLAYER_USER" | cut -d: -f6); [ -d "$dir/Videos" ] && dir=$dir/Videos
     exec shabnam-files "$dir"
   fi
   case $target in
@@ -87,6 +87,9 @@ target=$1
 [ -n "$target" ] || { echo "usage: shabnam-player FILE-or-URL" >&2; exit 2; }
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MPP_LIBS}"
 title=$SHABNAM_PLAYER_TITLE
+# Started by the file manager (already the unprivileged user): the sound link root made earlier.
+[ -n "$PULSE_SERVER" ] || { [ -S /run/shabnam-share/pulse-native ] && export PULSE_SERVER=unix:/run/shabnam-share/pulse-native; }
+[ -n "$title" ] || case $target in *://*) ;; *) title=$(basename "$target") ;; esac
 
 case $target in
   http://*|https://*)

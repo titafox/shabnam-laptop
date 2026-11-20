@@ -245,5 +245,10 @@ cd linux-rust/mac/ShabnamDisplay && make app
 
 ## 许可
 
-尚未确定。`linux-rust/mac/ShabnamDisplay/` 暂时附了 MIT 许可文本。
-Shabnam 的名称和水滴标志不随代码一起授权。
+本仓库的代码以 **MIT** 授权，见根目录 [`LICENSE`](LICENSE)。
+
+两点说明：
+
+- **第三方组件保留各自的许可**：`rkdeveloptool/`、niri 及其补丁、以及系统整包里厂商的
+  Mali / Rockchip MPP 等闭源库，都按其原本的授权，不在本仓库的 MIT 范围内。
+- **Shabnam 的名称和水滴标志**是项目标识，不随代码一起授权。

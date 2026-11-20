@@ -38,8 +38,16 @@ if [ "$(id -u)" = 0 ]; then
   case $target in
     *://*) ;;
     *)
-      [ -f "$target" ] || { echo "shabnam-player: no such file: $target" >&2; exit 1; }
-      exec 3<"$target" || exit 1
+      real=$(realpath -e -- "$target" 2>/dev/null) && [ -f "$real" ] ||
+        { echo "shabnam-player: no such file: $target" >&2; exit 1; }
+      # This script opens the file as root and hands it to the unprivileged player. A file that user
+      # could not read itself is only handed over when the path was a plain one: a link placed in a
+      # folder the browser's user can write to (a download) must not make root open a private file.
+      if ! setpriv --reuid "$PLAYER_USER" --regid "$PLAYER_USER" --init-groups test -r "$real"; then
+        [ "$(realpath -s -- "$target")" = "$real" ] && [ "$(stat -c %h -- "$real")" = 1 ] ||
+          { echo "shabnam-player: refusing a linked private file: $target" >&2; exit 1; }
+      fi
+      exec 3<"$real" || exit 1
       title=$(basename "$target"); target=fd://3 ;;
   esac
   uid=$(id -u "$PLAYER_USER") || { echo "shabnam-player: user $PLAYER_USER is missing" >&2; exit 1; }

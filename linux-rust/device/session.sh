@@ -22,11 +22,12 @@ if ! grep -q zram0 /proc/swaps; then
 fi 2>/dev/null
 echo 100 > /proc/sys/vm/swappiness; echo 0 > /proc/sys/vm/page-cluster
 pidof udevd >/dev/null || { udevd --daemon; udevadm trigger --action=add --subsystem-match=input --subsystem-match=drm; udevadm settle; }
-# Hands out the 10.55.0.x address the Mac side uses to recognise the cable.
-# The cable's network port appears a few seconds after start-up, so wait for it.
-(until ip link show usb0 >/dev/null 2>&1; do sleep 2; done
- pidof dnsmasq >/dev/null || dnsmasq --interface=usb0 --bind-interfaces --port=0 \
-  --dhcp-range=10.55.0.2,10.55.0.9,255.255.255.0,12h --dhcp-option=3 --dhcp-option=6 --dhcp-leasefile=/var/log/shabnam/usb0.leases) >/var/log/shabnam/dnsmasq.log 2>&1 &
+# Hands out the 10.55.0.x address the Mac side uses to recognise the cable. The cable's network
+# port appears a few seconds after start-up and is re-created when the USB link is re-bound, so
+# dnsmasq is told to follow interfaces as they come and go instead of binding once.
+pidof dnsmasq >/dev/null || dnsmasq --interface=usb0 --bind-dynamic --port=0 \
+  --dhcp-range=10.55.0.2,10.55.0.9,255.255.255.0,12h --dhcp-option=3 --dhcp-option=6 \
+  --dhcp-leasefile=/var/log/shabnam/usb0.leases >/var/log/shabnam/dnsmasq.log 2>&1
 
 # Join the saved Wi-Fi network (see wifi-setup); the desktop does not wait for it.
 [ -s /etc/wpa_supplicant/wpa_supplicant-wlan0.conf ] && (wifi-up >/var/log/shabnam/wifi-up.log 2>&1 &)

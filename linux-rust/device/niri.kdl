@@ -16,7 +16,8 @@ input {
         natural-scroll
     }
 }
-prefer-no-csd
+// Windows draw their own title bar (with a close button). niri draws none itself, so asking
+// applications to go without ("prefer-no-csd") left some of them with no way to close by mouse.
 // Always draw windows through the graphics chip. Handing a window's picture straight to a display
 // plane ("direct scanout") makes this display controller flicker, most visibly with the browser.
 debug {

@@ -1,0 +1,13 @@
+[package]
+name = "shabnam-filechooser"
+version = "0.1.0"
+edition = "2021"
+description = "The Open file / Save as / Choose folder window of the third-party programs: the part of zenity's command line they use, drawn with the installed GTK 3. See src/main.rs."
+
+# No crates: GTK 3 is opened by name at run time (libgtk-3.so.0), so the build needs no sysroot.
+[dependencies]
+
+[profile.release]
+opt-level = 2
+strip = true
+panic = "abort"

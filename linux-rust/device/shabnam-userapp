@@ -4,12 +4,15 @@
 # The desktop runs as root; programs we did not write (the PDF reader, the text editor, the
 # spreadsheet … built by linux-rust/apps/*/build.sh) must not. Like shabnam-browser and shabnam-player,
 # this script lets the user "shabnam" (uid 700) reach the compositor's Wayland socket — nothing
-# else, not even sound — and drops to that user with HOME=/home/shabnam. The program opens files with
+# else, and sound only when asked — and drops to that user with HOME=/home/shabnam. The program opens files with
 # that user's rights: what lies under /home/shabnam or is readable by everyone, nothing under /root.
 #
 # The interface language follows the session: LANG / LC_ALL / LC_MESSAGES are passed through
 # (zh_CN.UTF-8, ru_RU.UTF-8 or en_US.UTF-8; zh_CN.UTF-8 when the session sets none).
 # Variables named in SHABNAM_APP_ENV ("NAME=value NAME=value", no spaces inside a value) are set for the program.
+# SHABNAM_APP_SOUND=1 (set by the launcher of a program that plays sound, e.g. shabnam-music) also
+# gives the program the sound server: the same hard link to PipeWire's PulseAudio socket that
+# shabnam-player makes, named to the program as PULSE_SERVER. Without it a program gets no sound.
 umask 022
 APP_USER=shabnam
 MALI_LIBS=/opt/mali/mali:/opt/mali      # the GPU driver (GLES through EGL); the programs load it themselves
@@ -27,6 +30,12 @@ if [ "$(id -u)" = 0 ]; then
     chgrp "$APP_USER" "$socket" && chmod 660 "$socket" && ln -f "$socket" "$share/wayland-0" ||
     { echo "shabnam-userapp: cannot share $socket with $APP_USER" >&2; exit 1; }
   socket=$share/wayland-0
+  pulse=
+  if [ "$SHABNAM_APP_SOUND" = 1 ]; then
+    pulse=${XDG_RUNTIME_DIR:-/run/user0}/pulse/native
+    if [ -S "$pulse" ] && chgrp "$APP_USER" "$pulse" && chmod 660 "$pulse" && ln -f "$pulse" "$share/pulse-native"
+    then pulse=unix:$share/pulse-native; else pulse=; fi
+  fi
   runtime=/run/user/$uid
   mkdir -p "$runtime" && chown "$APP_USER:$APP_USER" "$runtime" && chmod 700 "$runtime"
   home=$(getent passwd "$APP_USER" | cut -d: -f6)
@@ -49,8 +58,13 @@ if [ "$(id -u)" = 0 ]; then
       ${LC_ALL:+LC_ALL="$LC_ALL"} ${LC_MESSAGES:+LC_MESSAGES="$LC_MESSAGES"} ${TZ:+TZ="$TZ"} \
       XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY="$socket" \
       LD_LIBRARY_PATH="$MALI_LIBS" \
+      ${pulse:+PULSE_SERVER="$pulse"} \
       $SHABNAM_APP_ENV \
       "$prog" "$@"
+fi
+# Started by the file manager (already the unprivileged user): the sound link root made earlier.
+if [ "$SHABNAM_APP_SOUND" = 1 ] && [ -z "$PULSE_SERVER" ] && [ -S /run/shabnam-share/pulse-native ]; then
+  export PULSE_SERVER=unix:/run/shabnam-share/pulse-native
 fi
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MALI_LIBS}"
 # shellcheck disable=SC2086

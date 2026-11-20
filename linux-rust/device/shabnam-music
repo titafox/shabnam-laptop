@@ -1,0 +1,17 @@
+#!/bin/sh
+# shabnam-music [FILE ...] — the music player: Gem Player (linux-rust/apps/gem-player/build.sh), run
+# as the unprivileged user through shabnam-userapp.
+#   shabnam-music              the library: every audio file under /home/shabnam/Music
+#   shabnam-music song.mp3     plays that file, then the other audio files of its folder
+# Sound: SHABNAM_APP_SOUND=1 makes shabnam-userapp hand the program the sound server's socket
+# (PULSE_SERVER); Gem Player speaks the PulseAudio protocol to PipeWire itself (no ALSA device needed).
+# It keeps playing when its window is not focused or is on another workspace.
+# The interface language follows LANG (Chinese, Russian and English are built in). It draws with
+# OpenGL ES (egui's glow renderer), never looks for updates and does not use the network.
+#
+# One player at a time: a file opened from the file manager while a player is running replaces that
+# player (the program has no "open in the running window"); two would play over each other.
+if [ $# -gt 0 ]; then
+  pkill -u shabnam -x gem-player 2>/dev/null && sleep 0.3
+fi
+SHABNAM_APP_SOUND=1 exec shabnam-userapp /usr/local/lib/gem-player/gem-player "$@"

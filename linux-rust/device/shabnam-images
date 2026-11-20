@@ -1,0 +1,21 @@
+#!/bin/sh
+# shabnam-images [FILE | FOLDER] — the picture viewer: Simp (linux-rust/apps/simp/build.sh), run as
+# the unprivileged user through shabnam-userapp.
+#   shabnam-images photo.jpg   that picture; the arrow keys / A and D go through the others in its folder
+#   shabnam-images             the Pictures folder, when it holds a picture; otherwise an empty window
+#   WGPU_BACKEND=gl  Simp draws with wgpu; its OpenGL backend (GLES through EGL) is the only one this
+#                    GPU driver can serve (no Vulkan).
+# Mouse: wheel = zoom, drag = move, menus for rotate / flip / crop / resize / save as / fullscreen.
+# Keys: Q E rotate, F or F11 fullscreen, Ctrl+B fit, Delete moves the file to the trash.
+# The interface is English only (Simp has no translations). It never looks for updates and does not
+# use the network. File > Open needs the desktop portal's file chooser, which this system does not
+# run: pictures are opened from the file manager (double click) instead.
+if [ $# -eq 0 ]; then
+  dir=$(getent passwd shabnam | cut -d: -f6)/Pictures
+  # Only when root can see a picture there (the same files the user sees); never a search of the whole tree.
+  first=$(find "$dir" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \
+            -o -iname '*.gif' -o -iname '*.bmp' \) 2>/dev/null | head -n 1)
+  [ -n "$first" ] && set -- "$dir"
+fi
+SHABNAM_APP_ENV="WGPU_BACKEND=gl $SHABNAM_APP_ENV" \
+  exec shabnam-userapp /usr/local/lib/simp/simp "$@"

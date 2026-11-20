@@ -1,0 +1,16 @@
+diff --git a/src/main.rs b/src/main.rs
+index 5c9567b..a9b25c4 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -145,7 +145,10 @@ impl WindowHandler {
+             .await
+             .expect("Unable to create adapter");
+ 
+-        let limits = wgpu::Limits::default();
++        // Shabnam: ask for what this adapter has, not for wgpu's desktop defaults. The laptop's
++        // GLES 3.2 driver offers 4 colour attachments (the defaults ask for 8), and with the
++        // defaults the program ended here at start ("LimitsExceeded ... max_color_attachments").
++        let limits = adapter.limits();
+         let (device, queue) = adapter
+             .request_device(&wgpu::DeviceDescriptor {
+                 label: None,

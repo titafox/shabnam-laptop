@@ -1,0 +1,33 @@
+diff --git a/build.rs b/build.rs
+index 862dfda..b6c367e 100644
+--- a/build.rs
++++ b/build.rs
+@@ -42,20 +42,15 @@ fn main() -> std::io::Result<()> {
+     {
+         println!("cargo:rerun-if-changed=Cargo.toml");
+ 
+-        Command::new("cargo").args(["about", "init"]).spawn()?;
+-
++        // Shabnam: upstream runs `cargo about` here (a separately installed cargo plug-in) to
++        // collect every dependency's licence text for Help > Licenses. The build must not need
++        // it; the page names the place where those texts are.
+         let out_dir = env::var("OUT_DIR").unwrap();
+-        let child = Command::new("cargo")
+-            .args([
+-                "about",
+-                "generate",
+-                "about.hbs",
+-                "-o",
+-                &format!("{out_dir}/license.html"),
+-            ])
+-            .spawn()?;
+-        let exit_status = child.wait_with_output()?.status;
+-        assert!(exit_status.success());
++        std::fs::write(
++            format!("{out_dir}/license.html"),
++            "<html><body><p>Simp is licensed under Apache-2.0. Its dependencies and their \
++             licences are listed in Cargo.lock at https://github.com/Kl4rry/simp</p></body></html>\n",
++        )?;
+     }
+ 
+     Ok(())

@@ -3,8 +3,10 @@
 # ~/.config/mimeapps.list wins over this file. Every application named here also lists the type
 # in its .desktop file's MimeType line (linux-rust/device/app-names/).
 #
-# Pictures go to the browser because no viewer is installed; PDF, text, spreadsheets and documents have their own programs. The browser runs as the user
-# "shabnam": it shows files under /home/shabnam (its downloads) but cannot read anything under /root.
+# Pictures, music, PDF, text, spreadsheets and documents have their own programs; AVIF pictures stay
+# with the browser (the picture viewer is built without an AVIF decoder), and .opus files have no
+# program (the music player cannot decode Opus). Every program runs as the user "shabnam": it opens
+# files under /home/shabnam but cannot read anything under /root.
 [Default Applications]
 inode/directory=shabnam-files.desktop
 video/mp4=shabnam-player.desktop
@@ -44,13 +46,35 @@ text/html=shabnam-browser.desktop
 application/xhtml+xml=shabnam-browser.desktop
 x-scheme-handler/http=shabnam-browser.desktop
 x-scheme-handler/https=shabnam-browser.desktop
-image/png=shabnam-browser.desktop
-image/jpeg=shabnam-browser.desktop
-image/gif=shabnam-browser.desktop
-image/webp=shabnam-browser.desktop
-image/svg+xml=shabnam-browser.desktop
-image/bmp=shabnam-browser.desktop
+image/jpeg=shabnam-images.desktop
+image/png=shabnam-images.desktop
+image/webp=shabnam-images.desktop
+image/gif=shabnam-images.desktop
+image/bmp=shabnam-images.desktop
+image/svg+xml=shabnam-images.desktop
+image/tiff=shabnam-images.desktop
+image/x-icon=shabnam-images.desktop
+image/vnd.microsoft.icon=shabnam-images.desktop
+image/x-tga=shabnam-images.desktop
+image/qoi=shabnam-images.desktop
+image/vnd.adobe.photoshop=shabnam-images.desktop
+image/x-exr=shabnam-images.desktop
 image/avif=shabnam-browser.desktop
+audio/mpeg=shabnam-music.desktop
+audio/mp3=shabnam-music.desktop
+audio/flac=shabnam-music.desktop
+audio/x-flac=shabnam-music.desktop
+audio/mp4=shabnam-music.desktop
+audio/x-m4a=shabnam-music.desktop
+audio/aac=shabnam-music.desktop
+audio/ogg=shabnam-music.desktop
+audio/x-vorbis+ogg=shabnam-music.desktop
+audio/vorbis=shabnam-music.desktop
+audio/x-wav=shabnam-music.desktop
+audio/wav=shabnam-music.desktop
+audio/vnd.wave=shabnam-music.desktop
+audio/x-aiff=shabnam-music.desktop
+audio/aiff=shabnam-music.desktop
 application/pdf=shabnam-pdf.desktop
 application/vnd.openxmlformats-officedocument.spreadsheetml.sheet=shabnam-sheet.desktop
 application/vnd.ms-excel=shabnam-sheet.desktop

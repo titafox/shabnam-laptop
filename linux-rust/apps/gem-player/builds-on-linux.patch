@@ -1,0 +1,159 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index c356b82..3e4ae7e 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -27,7 +27,6 @@ lofty = "0.25.5"
+ log = "0.4.35"
+ m3u = "1.0.0"
+ mimalloc = "0.1.52"
+-muda = "0.21.2"
+ nosleep = "0.2.1"
+ notify = "8.2.2"
+ notify-debouncer-mini = "0.7.0"
+@@ -51,6 +50,10 @@ walkdir = "2.5.0"
+ [patch.crates-io]
+ winit = { path = "vendor/winit" }
+ 
++# Shabnam: the native menu bar (GTK 3 on Linux) is not built on Linux; see src/main.rs.
++[target.'cfg(not(target_os = "linux"))'.dependencies]
++muda = "0.21.2"
++
+ [target.'cfg(target_os = "macos")'.dependencies]
+ apple-scoped-bookmarks = { version = "0.1.0", optional = true }
+ 
+diff --git a/src/main.rs b/src/main.rs
+index ba88653..f07ffe8 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -8,7 +8,6 @@ use crate::{
+     commands::{GemCommand, execute},
+     library::{Library, load_library, set_library_directory},
+     localization::LanguageSettings,
+-    menu::{MenuBar, create_menu},
+     nosleep_manager::NoSleepManager,
+     os_media_controls::{OSMediaControlsState, poll_media_events, setup_os_media_controls, update_metadata, update_playback},
+     player::{get_position, stop},
+@@ -40,7 +39,6 @@ use std::{
+     collections::HashMap,
+     fs::{copy, read},
+     mem::take,
+-    str::FromStr,
+     sync::{
+         Arc,
+         atomic::Ordering,
+@@ -49,9 +47,14 @@ use std::{
+     thread,
+     time::Duration,
+ };
++#[cfg(not(target_os = "linux"))]
++use std::str::FromStr;
+ use track::{SortBy, SortOrder, Track};
+ use visualizer::{CENTER_FREQUENCIES, setup_visualizer_pipeline};
+ 
++#[cfg(not(target_os = "linux"))]
++use crate::menu::{MenuBar, create_menu};
++
+ #[cfg(any(target_os = "windows", target_os = "linux", all(target_os = "macos", not(feature = "app-store"))))]
+ use std::path::PathBuf;
+ 
+@@ -69,6 +72,9 @@ mod artwork_cache;
+ mod commands;
+ mod library;
+ mod localization;
++// Shabnam: upstream's Linux port stops at the native menu bar (it does not compile there); its
++// four entries (close, minimize, fullscreen, report an issue) are not needed on this desktop.
++#[cfg(not(target_os = "linux"))]
+ mod menu;
+ mod nosleep_manager;
+ mod os_media_controls;
+@@ -111,6 +117,7 @@ struct GemPlayer {
+ 
+     os_media_controls: OSMediaControlsState,
+ 
++    #[cfg(not(target_os = "linux"))]
+     menubar: MenuBar,
+ }
+ 
+@@ -246,6 +253,7 @@ pub fn init_gem_player(cc: &CreationContext<'_>) -> GemPlayer {
+         b.player.set_volume(initial_volume);
+     }
+ 
++    #[cfg(not(target_os = "linux"))]
+     let (menu, menu_receiver) = {
+         let (menu, receiver) = create_menu();
+ 
+@@ -265,9 +273,6 @@ pub fn init_gem_player(cc: &CreationContext<'_>) -> GemPlayer {
+             }
+         }
+ 
+-        #[cfg(target_os = "linux")]
+-        menu.init_for_gtk_window(&gtk_window, Some(&vertical_gtk_box));
+-
+         #[cfg(target_os = "macos")]
+         menu.init_for_nsapp();
+ 
+@@ -341,6 +346,7 @@ pub fn init_gem_player(cc: &CreationContext<'_>) -> GemPlayer {
+ 
+         os_media_controls: OSMediaControlsState::Pending,
+ 
++        #[cfg(not(target_os = "linux"))]
+         menubar: MenuBar { menu, menu_receiver },
+     }
+ }
+@@ -387,6 +393,7 @@ impl App for GemPlayer {
+         poll_library_folder_picker(self);
+         poll_library_reload(self);
+         poll_media_events(self);
++        #[cfg(not(target_os = "linux"))]
+         poll_menu_events(self);
+ 
+         #[cfg(target_os = "windows")]
+@@ -488,6 +495,7 @@ fn apply_menu_theme_for_windows(frame: &Frame, menu: &Menu, mode: Mode) {
+     }
+ }
+ 
++#[cfg(not(target_os = "linux"))]
+ fn poll_menu_events(gem: &mut GemPlayer) {
+     let events: Vec<_> = gem.menubar.menu_receiver.try_iter().collect();
+ 
+diff --git a/src/ui/settings_view.rs b/src/ui/settings_view.rs
+index 4057092..4cb2c38 100644
+--- a/src/ui/settings_view.rs
++++ b/src/ui/settings_view.rs
+@@ -9,11 +9,13 @@ use crate::{
+     APP_NAME, GemPlayer, apply_visuals_for_mode,
+     library::spawn_library_folder_picker,
+     localization::language_label,
+-    menu::{create_menu, init_menu, remove_menu},
+     resolve_theme_mode,
+     ui::{root::unselectable_label, widgets::toggle_switch::toggle},
+ };
+ 
++#[cfg(not(target_os = "linux"))]
++use crate::menu::{create_menu, init_menu, remove_menu};
++
+ #[cfg(target_os = "windows")]
+ use {
+     crate::apply_menu_theme_for_windows,
+@@ -187,6 +189,7 @@ fn handle_language_change(gem: &mut GemPlayer, #[cfg(target_os = "windows")] fra
+     #[cfg(target_os = "macos")]
+     remove_menu(&gem.menubar.menu);
+ 
++    #[cfg(not(target_os = "linux"))]
+     let (menu, receiver) = create_menu();
+ 
+     #[cfg(target_os = "windows")]
+@@ -195,8 +198,11 @@ fn handle_language_change(gem: &mut GemPlayer, #[cfg(target_os = "windows")] fra
+     #[cfg(target_os = "macos")]
+     init_menu(&menu)?;
+ 
+-    gem.menubar.menu = menu;
+-    gem.menubar.menu_receiver = receiver;
++    #[cfg(not(target_os = "linux"))]
++    {
++        gem.menubar.menu = menu;
++        gem.menubar.menu_receiver = receiver;
++    }
+ 
+     Ok(())
+ }

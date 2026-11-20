@@ -1,0 +1,18 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Music
+Name[zh_CN]=音乐
+Name[ru]=Музыка
+GenericName=Music Player
+GenericName[zh_CN]=音乐播放器
+GenericName[ru]=Музыкальный проигрыватель
+Comment=Play the music in the Music folder: library, playlists, queue (Gem Player)
+Comment[zh_CN]=播放“音乐”文件夹里的歌曲：曲库、播放列表、播放队列（Gem Player）
+Comment[ru]=Воспроизведение музыки из папки «Музыка»: библиотека, плейлисты, очередь (Gem Player)
+Exec=shabnam-music %F
+Icon=/usr/local/share/shabnam-apps/gem-player.png
+Terminal=false
+StartupWMClass=gem-player
+Categories=AudioVideo;Audio;Player;
+MimeType=audio/mpeg;audio/mp3;audio/flac;audio/x-flac;audio/mp4;audio/x-m4a;audio/aac;audio/ogg;audio/x-vorbis+ogg;audio/vorbis;audio/x-wav;audio/wav;audio/vnd.wave;audio/x-aiff;audio/aiff;

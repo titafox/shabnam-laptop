@@ -1,0 +1,299 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 3e4ae7e..775a610 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,9 +9,12 @@ authors = ["James Moreau"]
+ 
+ [dependencies]
+ anyhow = "1.0.104"
++# Shabnam: rodio's cpal (same version), named here only to switch on its PulseAudio-protocol
++# output (pure Rust; cpal prefers it over ALSA when a server answers). See ../build.sh.
++cpal = { version = "0.18.2", features = ["pulseaudio"] }
+ dark-light = "3.0.0"
+ directories = "6.0.0"
+-eframe = { version = "0.36.2", features = ["persistence"] }
++eframe = { version = "0.36.2", features = ["persistence", "glow"] }
+ egui = "0.36.2"
+ egui_extras = { version = "0.36.2", features = ["all_loaders"] }
+ egui_material_icons = "0.8.0"
+diff --git a/src/library.rs b/src/library.rs
+index 9abe4ad..44706e7 100644
+--- a/src/library.rs
++++ b/src/library.rs
+@@ -6,14 +6,12 @@ use std::{
+         mpsc::{Receiver, channel},
+     },
+     thread,
+-    time::Duration,
+ };
+ 
+ use anyhow::{Context, Result, bail};
+ use fully_pub::fully_pub;
+ use log::{error, info};
+-use notify::{RecommendedWatcher, RecursiveMode};
+-use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
++use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+ use rfd::FileDialog;
+ 
+ use crate::{
+@@ -39,7 +37,7 @@ struct Library {
+     access: Option<ScopedAccess>,
+ 
+     dirty: Arc<AtomicBool>,
+-    debouncer: Debouncer<RecommendedWatcher>,
++    debouncer: RecommendedWatcher,
+     reload_receiver: Option<Receiver<Result<LibraryAndPlaylists>>>,
+ 
+     folder_picker_receiver: Option<Receiver<Option<PathBuf>>>, // None -> No folder picker dialog. Some -> Folder picker dialog open.
+@@ -51,17 +49,19 @@ pub fn setup_library() -> Result<Library> {
+     let dirty = Arc::new(AtomicBool::new(false));
+ 
+     let callback_flag = Arc::clone(&dirty);
+-    let debouncer = new_debouncer(Duration::from_millis(500), move |res: DebounceEventResult| match res {
++    // Shabnam: the watcher is used directly instead of through notify-debouncer-mini, which hides
++    // what kind of event arrived. On Linux (inotify) merely opening or reading a file is an event
++    // too, so every reload of the library (which reads each file's tags) asked for the next
++    // reload, without end. Only events that change something mark the library as changed.
++    let debouncer = notify::recommended_watcher(move |res: notify::Result<notify::Event>| match res {
+         Err(e) => error!("Watch error: {e}"),
+-        Ok(events) => {
+-            for e in events {
+-                info!("Event for {}", e.path.display());
++        Ok(event) => {
++            if !matches!(event.kind, EventKind::Access(_)) {
++                callback_flag.store(true, Ordering::Relaxed);
+             }
+-
+-            callback_flag.store(true, Ordering::Relaxed);
+         }
+     })
+-    .context("Failed to create filesystem debouncer")?;
++    .context("Failed to create filesystem watcher")?;
+ 
+     Ok(Library {
+         tracks: Vec::new(),
+@@ -118,14 +118,13 @@ pub fn set_library_directory(library: &mut Library, new_directory: &Path) -> Res
+ 
+     library
+         .debouncer
+-        .watcher()
+         .watch(new_directory, RecursiveMode::Recursive)
+         .with_context(|| format!("Failed to watch {}", new_directory.display()))?;
+ 
+     if let Some(old_directory) = &library.directory
+-        && let Err(e) = library.debouncer.watcher().unwatch(old_directory)
++        && let Err(e) = library.debouncer.unwatch(old_directory)
+     {
+-        if let Err(rollback_error) = library.debouncer.watcher().unwatch(new_directory) {
++        if let Err(rollback_error) = library.debouncer.unwatch(new_directory) {
+             error!("Failed to roll back watch on {}: {rollback_error}", new_directory.display());
+         }
+ 
+diff --git a/src/main.rs b/src/main.rs
+index f07ffe8..51acb40 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -129,6 +129,8 @@ fn main() -> eframe::Result {
+ 
+     let viewport = ViewportBuilder::default()
+         .with_min_inner_size(Vec2::new(900.0, 500.0))
++        // Shabnam: a Wayland app id without a space, the one the launcher entry names.
++        .with_app_id("gem-player")
+         .with_icon(icon_data);
+ 
+     #[cfg(target_os = "macos")]
+@@ -138,6 +140,8 @@ fn main() -> eframe::Result {
+         viewport,
+         // This fixes the crash on macos when hitting the close window button.
+         run_and_return: false,
++        // Shabnam: draw with OpenGL ES (egui_glow); the laptop's GPU driver has no Vulkan.
++        renderer: eframe::Renderer::Glow,
+         ..Default::default()
+     };
+     run_native(APP_NAME, options, Box::new(|cc| Ok(Box::new(init_gem_player(cc)))))
+@@ -201,7 +205,10 @@ pub fn init_gem_player(cc: &CreationContext<'_>) -> GemPlayer {
+         if let Some(language_string) = storage.get_string(LANGUAGE_STORAGE_KEY)
+             && let Ok(Some(locale)) = serde_json::from_str::<Option<String>>(&language_string)
+         {
+-            selected_locale = Some(locale);
++            // Shabnam: the interface language follows the session's locale (LC_ALL / LC_MESSAGES /
++            // LANG) at every start; a language picked in Settings lasts until the program closes.
++            let _ = locale;
++            selected_locale = None;
+         }
+ 
+         if let Some(volume_string) = storage.get_string(VOLUME_STORAGE_KEY)
+@@ -246,6 +253,16 @@ pub fn init_gem_player(cc: &CreationContext<'_>) -> GemPlayer {
+         }
+     }
+ 
++    // Shabnam: there is no folder-chooser service on this desktop, so the library starts as the
++    // user's Music folder when none is stored yet.
++    if library.directory.is_none()
++        && let Some(music) = std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Music"))
++        && music.is_dir()
++        && let Err(e) = set_library_directory(&mut library, &music)
++    {
++        error!("Failed to use {} as the library: {e}", music.display());
++    }
++
+     let language_settings = LanguageSettings::new(selected_locale);
+     language_settings.apply();
+ 
+@@ -326,7 +343,9 @@ pub fn init_gem_player(cc: &CreationContext<'_>) -> GemPlayer {
+         player: Player {
+             history: Vec::new(),
+             playing: None,
+-            queue: Vec::new(),
++            // Shabnam: audio files named on the command line (a double click in the file manager)
++            // are queued; `check_for_next_track` starts the first one on the first frame.
++            queue: tracks_from_command_line(),
+ 
+             repeat: false,
+             shuffle: None,
+@@ -411,10 +430,15 @@ impl App for GemPlayer {
+         self.ui.toasts.show(ui);
+ 
+         // Set a minimum refresh rate for the app to keep the ui elements updated.
+-        ui.request_repaint_after(Duration::from_millis(33)); // ~30 fps
++        // Shabnam: upstream redraws 30 times a second at all times, which kept half of one of the
++        // laptop's four slow cores busy with nothing playing. 15 a second while a track plays
++        // (position, visualizer), once a second otherwise; input still redraws at once.
++        let playing = self.player.playing.is_some() && self.player.backend.as_ref().is_some_and(|b| !b.player.is_paused());
++        ui.request_repaint_after(Duration::from_millis(if playing { 66 } else { 1000 }));
+     }
+ 
+-    fn on_exit(&mut self) {
++    // Shabnam: with eframe's glow renderer compiled in, the trait method takes the GL context.
++    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+         stop(&mut self.player);
+ 
+         let _ = self.player.visualizer.command_sender.send(visualizer::VisualizerCommand::Shutdown);
+@@ -433,7 +457,9 @@ pub fn start_logic_wakeup_thread(ctx: &Context) {
+         loop {
+             ctx.request_repaint();
+ 
+-            thread::sleep(Duration::from_millis(100));
++            // Shabnam: 500 ms instead of 100 ms (this alone redrew the window 10 times a second);
++            // it only has to notice the end of a track while the window is hidden.
++            thread::sleep(Duration::from_millis(500));
+         }
+     });
+ }
+@@ -769,6 +795,43 @@ fn on_track_change(ctx: &Context, gem: &mut GemPlayer) {
+     }
+ }
+ 
++/// Shabnam: `gem-player FILE...`. One file: that file, then the other audio files of its folder in
++/// name order (so "next" and "previous" work as in a folder view). Several files: those files.
++fn tracks_from_command_line() -> Vec<Track> {
++    let mut paths: Vec<PathBuf> = std::env::args_os()
++        .skip(1)
++        .map(PathBuf::from)
++        .filter(|path| path.is_file() && is_audio_file(path))
++        .collect();
++
++    if let [only] = paths.as_slice()
++        && let Some(folder) = only.parent()
++        && let Ok(entries) = std::fs::read_dir(folder)
++    {
++        let mut siblings: Vec<PathBuf> = entries
++            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
++            .filter(|path| path.is_file() && is_audio_file(path))
++            .take(2000)
++            .collect();
++        siblings.sort();
++        if let Some(index) = siblings.iter().position(|path| path == only) {
++            siblings.rotate_left(index);
++            paths = siblings;
++        }
++    }
++
++    paths
++        .iter()
++        .filter_map(|path| match track::load_from_file(path) {
++            Ok(track) => Some(track),
++            Err(e) => {
++                warn!("Skipping '{}': {e}", path.display());
++                None
++            }
++        })
++        .collect()
++}
++
+ pub const DARK_ACCENT: Color32 = Color32::from_rgb(0x46, 0x7E, 0xDC);
+ pub const LIGHT_ACCENT: Color32 = Color32::from_rgb(0x66, 0xA2, 0xE4);
+ 
+@@ -797,7 +860,9 @@ fn apply_visuals_for_mode(ctx: &Context, mode: Mode) {
+     ctx.set_visuals(visuals);
+ }
+ 
+-fn load_font_family(family_names: &[&str]) -> Option<Vec<u8>> {
++// Shabnam: returns the face number as well. Noto Sans CJK is one collection file holding the
++// Japanese, Korean and Chinese faces; without the number egui takes the first (Japanese) one.
++fn load_font_family(family_names: &[&str]) -> Option<(Vec<u8>, u32)> {
+     let system_source = SystemSource::new();
+ 
+     for &name in family_names {
+@@ -808,14 +873,14 @@ fn load_font_family(family_names: &[&str]) -> Option<Vec<u8>> {
+                 continue;
+             }
+             Ok(handle) => match handle {
+-                Handle::Memory { ref bytes, .. } => {
++                Handle::Memory { ref bytes, font_index } => {
+                     debug!("Loaded {name} from memory.");
+-                    return Some(bytes.to_vec());
++                    return Some((bytes.to_vec(), font_index));
+                 }
+-                Handle::Path { ref path, .. } => {
+-                    info!("Loaded {name} from path: {}", path.display());
++                Handle::Path { ref path, font_index } => {
++                    info!("Loaded {name} from path: {} (face {font_index})", path.display());
+                     if let Ok(data) = read(path) {
+-                        return Some(data);
++                        return Some((data, font_index));
+                     } else {
+                         error!("Failed to read font data from path: {}", path.display());
+                     }
+@@ -850,9 +915,11 @@ fn load_system_fonts(fonts: &mut FontDefinitions) {
+ 
+     // Iterate over each region and try to load a matching system font.
+     for (region, font_names) in fontdb.iter() {
+-        if let Some(font_data) = load_font_family(font_names) {
++        if let Some((font_data, font_index)) = load_font_family(font_names) {
+             info!("Inserting font fallback for region: {region}.");
+-            fonts.font_data.insert(region.to_string(), FontData::from_owned(font_data).into());
++            let mut font_data = FontData::from_owned(font_data);
++            font_data.index = font_index;
++            fonts.font_data.insert(region.to_string(), font_data.into());
+ 
+             // Add the region key as a fallback font in the proportional family.
+             // This means that if the primary font is missing a glyph, egui will try this fallback.
+diff --git a/src/track.rs b/src/track.rs
+index e9da94d..f3e4640 100644
+--- a/src/track.rs
++++ b/src/track.rs
+@@ -126,17 +126,18 @@ pub fn load_from_file(path: &Path) -> Result<Track> {
+ 
+     let tag = tagged_file
+         .primary_tag()
+-        .or_else(|| tagged_file.first_tag())
+-        .ok_or_else(|| anyhow!("No tags found in file '{}'", path.display()))?;
++        .or_else(|| tagged_file.first_tag());
++    // Shabnam: a file without any tag (most WAV files) is listed under its file name instead of
++    // being left out of the library.
+ 
+     let title = tag
+-        .get_string(ItemKey::TrackTitle)
++        .and_then(|tag| tag.get_string(ItemKey::TrackTitle))
+         .map(|t| t.to_owned())
+         .or_else(|| path.file_stem().and_then(|s| s.to_str()).map(|s| s.to_owned()));
+ 
+-    let artist = tag.get_string(ItemKey::TrackArtist).map(|a| a.to_owned());
++    let artist = tag.and_then(|tag| tag.get_string(ItemKey::TrackArtist)).map(|a| a.to_owned());
+ 
+-    let album = tag.get_string(ItemKey::AlbumTitle).map(|a| a.to_owned());
++    let album = tag.and_then(|tag| tag.get_string(ItemKey::AlbumTitle)).map(|a| a.to_owned());
+ 
+     let properties = tagged_file.properties();
+ 

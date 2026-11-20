@@ -9,9 +9,8 @@
 # The interface language follows LANG (Chinese, Russian and English are built in). It draws with
 # OpenGL ES (egui's glow renderer), never looks for updates and does not use the network.
 #
-# One player at a time: a file opened from the file manager while a player is running replaces that
-# player (the program has no "open in the running window"); two would play over each other.
-if [ $# -gt 0 ]; then
-  pkill -u shabnam -x gem-player 2>/dev/null && sleep 0.3
-fi
+# One player at a time: a file opened from the file manager while a player is running is handed to
+# that player, which plays it in its window (our patch: the second gem-player writes the file names
+# to the first one's socket, /run/user/700/gem-player.sock, and ends). Without files a second
+# start opens a second window, as upstream.
 SHABNAM_APP_SOUND=1 exec shabnam-userapp /usr/local/lib/gem-player/gem-player "$@"

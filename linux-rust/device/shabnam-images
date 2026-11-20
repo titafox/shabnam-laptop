@@ -7,8 +7,8 @@
 #                    GPU driver can serve (no Vulkan).
 # Mouse: wheel = zoom, drag = move, menus for rotate / flip / crop / resize / save as / fullscreen.
 # Keys: Q E rotate, F or F11 fullscreen, Ctrl+B fit, Delete moves the file to the trash.
-# The interface is English only (Simp has no translations). It never looks for updates and does not
-# use the network. File > Open needs the desktop portal's file chooser, which this system does not
+# The interface language follows LANG (Chinese and Russian are added by our patch; English
+# otherwise). It never looks for updates and does not use the network. File > Open needs the desktop portal's file chooser, which this system does not
 # run: pictures are opened from the file manager (double click) instead.
 if [ $# -eq 0 ]; then
   dir=$(getent passwd shabnam | cut -d: -f6)/Pictures

@@ -1,0 +1,227 @@
+diff -ruN rodio-a/Cargo.toml rodio-b/Cargo.toml
+--- rodio-a/Cargo.toml	2026-11-20 13:38:39
++++ rodio-b/Cargo.toml	2026-11-20 13:41:53
+@@ -386,6 +386,10 @@
+ optional = true
+ default-features = false
+ 
++# Shabnam: the Opus decoder used by src/decoder/opus.rs (libopus translated to Rust; no C code).
++[dependencies.unsafe-libopus]
++version = "=0.2.0"
++
+ [dependencies.thiserror]
+ version = "2"
+ 
+diff -ruN rodio-a/src/decoder/mod.rs rodio-b/src/decoder/mod.rs
+--- rodio-a/src/decoder/mod.rs	2026-11-20 13:38:39
++++ rodio-b/src/decoder/mod.rs	2026-11-20 13:39:06
+@@ -69,6 +69,9 @@
+ mod flac;
+ #[cfg(all(feature = "minimp3", not(feature = "symphonia-mp3")))]
+ mod mp3;
++// Shabnam: Opus decoding for the Symphonia backend; see opus.rs.
++#[cfg(feature = "symphonia")]
++mod opus;
+ #[cfg(feature = "symphonia")]
+ mod read_seek_source;
+ #[cfg(feature = "symphonia")]
+diff -ruN rodio-a/src/decoder/opus.rs rodio-b/src/decoder/opus.rs
+--- rodio-a/src/decoder/opus.rs	1970-01-01 06:00:00
++++ rodio-b/src/decoder/opus.rs	2026-11-20 13:42:15
+@@ -0,0 +1,183 @@
++//! Shabnam: Opus for the Symphonia backend.
++//!
++//! Symphonia 0.5 reads Ogg Opus files (container, tags, length, seeking) but has no Opus decoder,
++//! so such a file ended as "unrecognized format". This file is the missing piece: Symphonia's
++//! `Decoder` interface over the `unsafe-libopus` crate, put into the codec registry that
++//! `symphonia.rs` uses.
++//!
++//! `unsafe-libopus` is the reference decoder (libopus 1.3.1) translated from C to Rust by
++//! c2rust: built by cargo like any other crate, no C compiler and no system library, and its
++//! output is the reference's. It keeps the C code's shape, so its interface is pointers and
++//! `unsafe`; everything unsafe in this file is in `Libopus` below.
++//!
++//! Mono and stereo (channel mapping family 0 and the one- and two-channel cases of family 1),
++//! which is what music files are. Surround Opus is refused as unsupported, as before.
++
++use std::sync::OnceLock;
++
++use symphonia::core::{
++    audio::{AsAudioBufferRef, AudioBuffer, AudioBufferRef, Signal, SignalSpec},
++    codecs::{
++        CodecDescriptor, CodecParameters, CodecRegistry, Decoder, DecoderOptions, FinalizeResult,
++        CODEC_TYPE_OPUS,
++    },
++    errors::{decode_error, unsupported_error, Result},
++    formats::Packet,
++    support_codec,
++};
++use unsafe_libopus::opus_decoder_ctl;
++
++/// Opus always decodes at 48 kHz; a packet holds at most 120 ms.
++const SAMPLE_RATE: u32 = 48_000;
++const MAX_FRAMES: usize = 5760;
++
++/// Every codec Symphonia was built with, and Opus.
++pub(super) fn codecs() -> &'static CodecRegistry {
++    static REGISTRY: OnceLock<CodecRegistry> = OnceLock::new();
++    REGISTRY.get_or_init(|| {
++        let mut registry = CodecRegistry::new();
++        symphonia::default::register_enabled_codecs(&mut registry);
++        registry.register_all::<OpusDecoder>();
++        registry
++    })
++}
++
++/// One libopus decoder state: created by `new`, freed by `drop`, used through `&mut self` only.
++struct Libopus {
++    state: *mut unsafe_libopus::OpusDecoder,
++    channels: usize,
++}
++
++// The state is a private heap block with no thread affinity and no shared pointers into it.
++unsafe impl Send for Libopus {}
++unsafe impl Sync for Libopus {}
++
++impl Libopus {
++    fn new(channels: usize) -> Option<Self> {
++        let mut error = 0;
++        let state = unsafe {
++            unsafe_libopus::opus_decoder_create(SAMPLE_RATE as i32, channels as i32, &mut error)
++        };
++        (error == unsafe_libopus::OPUS_OK && !state.is_null()).then_some(Self { state, channels })
++    }
++
++    /// Decodes one packet into `pcm` (interleaved); the number of frames, or None for a bad
++    /// packet. libopus writes at most `pcm.len() / channels` frames.
++    fn decode(&mut self, packet: &[u8], pcm: &mut [f32]) -> Option<usize> {
++        let (len, room) = (i32::try_from(packet.len()).ok()?, (pcm.len() / self.channels) as i32);
++        if len == 0 {
++            return None;
++        }
++        let frames = unsafe {
++            unsafe_libopus::opus_decode_float(
++                self.state,
++                packet.as_ptr(),
++                len,
++                pcm.as_mut_ptr(),
++                room,
++                0,
++            )
++        };
++        usize::try_from(frames).ok()
++    }
++
++    fn reset(&mut self) {
++        unsafe {
++            opus_decoder_ctl!(self.state, unsafe_libopus::OPUS_RESET_STATE);
++        }
++    }
++}
++
++impl Drop for Libopus {
++    fn drop(&mut self) {
++        unsafe { unsafe_libopus::opus_decoder_destroy(self.state) }
++    }
++}
++
++pub(super) struct OpusDecoder {
++    params: CodecParameters,
++    decoder: Libopus,
++    channels: usize,
++    /// The file's "output gain" (OpusHead, in 1/256 dB) as a factor; players must apply it.
++    gain: f32,
++    /// The decoder's start-up samples at the head of the stream, which are not part of the sound.
++    pre_skip: u64,
++    pcm: Vec<f32>,
++    buf: AudioBuffer<f32>,
++}
++
++impl Decoder for OpusDecoder {
++    fn try_new(params: &CodecParameters, _options: &DecoderOptions) -> Result<Self> {
++        let Some(layout) = params.channels else {
++            return unsupported_error("opus: the number of channels is not known");
++        };
++        let channels = layout.count();
++        if !(1..=2).contains(&channels) {
++            return unsupported_error("opus: more than two channels");
++        }
++        let Some(decoder) = Libopus::new(channels) else {
++            return unsupported_error("opus: the decoder could not be set up");
++        };
++        // OpusHead: "OpusHead", version, channels, pre-skip (2), input rate (4), output gain (2).
++        let (pre_skip, gain) = match params.extra_data.as_deref() {
++            Some(head) if head.len() >= 18 => {
++                let q8 = i16::from_le_bytes([head[16], head[17]]);
++                (
++                    u64::from(u16::from_le_bytes([head[10], head[11]])),
++                    10f32.powf(f32::from(q8) / (20.0 * 256.0)),
++                )
++            }
++            _ => (0, 1.0),
++        };
++        Ok(Self {
++            params: params.clone(),
++            decoder,
++            channels,
++            gain,
++            pre_skip,
++            pcm: vec![0.0; MAX_FRAMES * channels],
++            buf: AudioBuffer::new(MAX_FRAMES as u64, SignalSpec::new(SAMPLE_RATE, layout)),
++        })
++    }
++
++    fn supported_codecs() -> &'static [CodecDescriptor] {
++        &[support_codec!(CODEC_TYPE_OPUS, "opus", "Opus")]
++    }
++
++    fn reset(&mut self) {
++        self.decoder.reset();
++    }
++
++    fn codec_params(&self) -> &CodecParameters {
++        &self.params
++    }
++
++    fn decode(&mut self, packet: &Packet) -> Result<AudioBufferRef<'_>> {
++        self.buf.clear();
++        let frames = match self.decoder.decode(packet.buf(), &mut self.pcm) {
++            Some(frames) if frames <= MAX_FRAMES => frames,
++            _ => return decode_error("opus: a packet could not be decoded"),
++        };
++        self.buf.render_reserved(Some(frames));
++        for channel in 0..self.channels {
++            let plane = self.buf.chan_mut(channel);
++            for (out, frame) in plane.iter_mut().zip(self.pcm.chunks_exact(self.channels)) {
++                *out = frame[channel] * self.gain;
++            }
++        }
++        // Left out: the pre-skip samples (the Ogg reader counts time from the first decoded
++        // sample, so they are the ones before `pre_skip`), and what the reader itself marks at
++        // either end (the samples after the stream's stated end).
++        let skip = self.pre_skip.saturating_sub(packet.ts()).min(frames as u64) as usize;
++        self.buf.trim(skip + packet.trim_start() as usize, packet.trim_end() as usize);
++        Ok(self.buf.as_audio_buffer_ref())
++    }
++
++    fn finalize(&mut self) -> FinalizeResult {
++        FinalizeResult::default()
++    }
++
++    fn last_decoded(&self) -> AudioBufferRef<'_> {
++        self.buf.as_audio_buffer_ref()
++    }
++}
+diff -ruN rodio-a/src/decoder/symphonia.rs rodio-b/src/decoder/symphonia.rs
+--- rodio-a/src/decoder/symphonia.rs	2026-11-20 13:38:39
++++ rodio-b/src/decoder/symphonia.rs	2026-11-20 13:39:06
+@@ -102,7 +102,8 @@
+             None => return Ok(None),
+         };
+ 
+-        let mut decoder = symphonia::default::get_codecs()
++        // Shabnam: Symphonia's own codecs and Opus (opus.rs); upstream: symphonia::default::get_codecs().
++        let mut decoder = super::opus::codecs()
+             .make(&track.codec_params, &DecoderOptions::default())?;
+         let total_duration: Option<Duration> = track
+             .codec_params

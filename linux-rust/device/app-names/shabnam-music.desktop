@@ -15,4 +15,4 @@ Icon=/usr/local/share/shabnam-apps/gem-player.png
 Terminal=false
 StartupWMClass=gem-player
 Categories=AudioVideo;Audio;Player;
-MimeType=audio/mpeg;audio/mp3;audio/flac;audio/x-flac;audio/mp4;audio/x-m4a;audio/aac;audio/ogg;audio/x-vorbis+ogg;audio/vorbis;audio/x-wav;audio/wav;audio/vnd.wave;audio/x-aiff;audio/aiff;
+MimeType=audio/mpeg;audio/mp3;audio/flac;audio/x-flac;audio/mp4;audio/x-m4a;audio/aac;audio/ogg;audio/x-vorbis+ogg;audio/vorbis;audio/opus;audio/x-opus+ogg;audio/x-wav;audio/wav;audio/vnd.wave;audio/x-aiff;audio/aiff;

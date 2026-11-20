@@ -4,9 +4,8 @@
 # in its .desktop file's MimeType line (linux-rust/device/app-names/).
 #
 # Pictures, music, PDF, text, spreadsheets and documents have their own programs; AVIF pictures stay
-# with the browser (the picture viewer is built without an AVIF decoder), and .opus files have no
-# program (the music player cannot decode Opus). Every program runs as the user "shabnam": it opens
-# files under /home/shabnam but cannot read anything under /root.
+# with the browser (the picture viewer is built without an AVIF decoder). Every program runs as the
+# user "shabnam": it opens files under /home/shabnam but cannot read anything under /root.
 [Default Applications]
 inode/directory=shabnam-files.desktop
 video/mp4=shabnam-player.desktop
@@ -70,6 +69,8 @@ audio/aac=shabnam-music.desktop
 audio/ogg=shabnam-music.desktop
 audio/x-vorbis+ogg=shabnam-music.desktop
 audio/vorbis=shabnam-music.desktop
+audio/opus=shabnam-music.desktop
+audio/x-opus+ogg=shabnam-music.desktop
 audio/x-wav=shabnam-music.desktop
 audio/wav=shabnam-music.desktop
 audio/vnd.wave=shabnam-music.desktop

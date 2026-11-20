@@ -1,0 +1,1389 @@
+diff --git a/src/app.rs b/src/app.rs
+index 654f305..c102a97 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -1,3 +1,4 @@
++use crate::i18n::tr;
+ use std::{
+     mem,
+     process::Command,
+@@ -294,10 +295,10 @@ impl App {
+                 let error = error.clone();
+                 self.dialog_manager
+                     .get_proxy()
+-                    .spawn_dialog("Error", move |ui, enter| {
++                    .spawn_dialog(tr("Error"), move |ui, enter| {
+                         ui.label(&error);
+                         ui.with_layout(egui::Layout::left_to_right(egui::Align::LEFT), |ui| {
+-                            if ui.button("Ok").clicked() {
++                            if ui.button(tr("Ok")).clicked() {
+                                 Some(())
+                             } else if *enter {
+                                 *enter = false;
+@@ -321,16 +322,16 @@ impl App {
+                 }
+                 thread::spawn(move || {
+                     let close = dialog_proxy
+-                        .spawn_dialog("Unsaved changes", move |ui, enter| {
++                        .spawn_dialog(tr("Unsaved changes"), move |ui, enter| {
+                             ui.label(
+-                            "You have unsaved changes are you sure you want to close this image?",
++                            tr("You have unsaved changes are you sure you want to close this image?"),
+                         );
+                             ui.with_layout(egui::Layout::left_to_right(egui::Align::LEFT), |ui| {
+-                                if ui.button("Ok").clicked() {
++                                if ui.button(tr("Ok")).clicked() {
+                                     return Some(true);
+                                 }
+ 
+-                                if ui.button("Cancel").clicked() {
++                                if ui.button(tr("Cancel")).clicked() {
+                                     return Some(false);
+                                 }
+ 
+@@ -688,7 +689,7 @@ impl App {
+             if self.image_view.is_none() {
+                 ui.centered_and_justified(|ui| {
+                     ui.label(
+-                        RichText::new("Open File: Ctrl + O\n\nPaste: Ctrl + V\n\nHelp: Ctrl + H")
++                        RichText::new(tr("Open File: Ctrl + O\n\nPaste: Ctrl + V\n\nHelp: Ctrl + H"))
+                             .size(20.0),
+                     );
+                 });
+@@ -706,13 +707,13 @@ impl App {
+                 response.context_menu(|ui| {
+                     context_menu_open = true;
+                     if ui
+-                        .add_enabled(has_image, egui::Button::new("Next"))
++                        .add_enabled(has_image, egui::Button::new(tr("Next")))
+                         .clicked()
+                     {
+                         self.queue(Op::Next);
+                     }
+                     if ui
+-                        .add_enabled(has_image, egui::Button::new("Previous"))
++                        .add_enabled(has_image, egui::Button::new(tr("Previous")))
+                         .clicked()
+                     {
+                         self.queue(Op::Prev);
+@@ -722,7 +723,7 @@ impl App {
+                     if ui
+                         .add_enabled(
+                             has_image,
+-                            egui::Button::new("Best fit").shortcut_text("Ctrl + B"),
++                            egui::Button::new(tr("Best fit")).shortcut_text("Ctrl + B"),
+                         )
+                         .clicked()
+                     {
+@@ -731,7 +732,7 @@ impl App {
+                     if ui
+                         .add_enabled(
+                             has_image,
+-                            egui::Button::new("Largest fit").shortcut_text("Ctrl + L"),
++                            egui::Button::new(tr("Largest fit")).shortcut_text("Ctrl + L"),
+                         )
+                         .clicked()
+                     {
+@@ -742,7 +743,7 @@ impl App {
+                     if ui
+                         .add_enabled(
+                             has_image,
+-                            egui::Button::new("Copy").shortcut_text("Ctrl + C"),
++                            egui::Button::new(tr("Copy")).shortcut_text("Ctrl + C"),
+                         )
+                         .clicked()
+                     {
+@@ -751,7 +752,7 @@ impl App {
+                     if ui
+                         .add_enabled(
+                             has_image,
+-                            egui::Button::new("Paste").shortcut_text("Ctrl + V"),
++                            egui::Button::new(tr("Paste")).shortcut_text("Ctrl + V"),
+                         )
+                         .clicked()
+                     {
+@@ -762,7 +763,7 @@ impl App {
+                     if ui
+                         .add_enabled(
+                             has_image,
+-                            egui::Button::new("Move to trash").shortcut_text("Delete"),
++                            egui::Button::new(tr("Move to trash")).shortcut_text("Delete"),
+                         )
+                         .clicked()
+                     {
+@@ -779,7 +780,7 @@ impl App {
+                     }
+                     ui.separator();
+ 
+-                    egui::containers::menu::SubMenuButton::new("Sort by").ui(ui, |ui| {
++                    egui::containers::menu::SubMenuButton::new(tr("Sort by")).ui(ui, |ui| {
+                         let mut preferences = PREFERENCES.lock().unwrap();
+                         ui.radio_value(
+                             &mut preferences.sort_order,
+@@ -838,14 +839,14 @@ impl App {
+                                     .unwrap()
+                                     .metadata
+                                     .is_empty(),
+-                            egui::Button::new("Metadata"),
++                            egui::Button::new(tr("Metadata")),
+                         )
+                         .clicked()
+                     {
+                         self.metadata_visible = true;
+                     }
+                     if ui
+-                        .add_enabled(has_image, egui::Button::new("Open folder"))
++                        .add_enabled(has_image, egui::Button::new(tr("Open folder")))
+                         .clicked()
+                         && let Some(image_view) = &self.image_view
+                         && let Some(path) = &image_view.path
+@@ -940,7 +941,7 @@ impl App {
+                     if let Some(image) = self.image_view.as_mut() {
+                         ui.label(self.current_filename.to_string());
+                         ui.label(format!("{} x {}", image.size.x, image.size.y));
+-                        ui.label(format!("Zoom: {}%", (image.scale * 100.0).round()));
++                        ui.label(format!("{}: {}%", tr("Zoom"), (image.scale * 100.0).round()));
+ 
+                         let g = image.image_data.read();
+                         let buf = g.as_ref().unwrap().frames[0].buffer();
+@@ -1093,7 +1094,7 @@ impl App {
+         if self.resize.visible {
+             let mut open = self.image_view.is_some();
+             let mut resized = false;
+-            egui::Window::new("Resize")
++            egui::Window::new(tr("Resize"))
+                 .id(egui::Id::new("resize window"))
+                 .collapsible(false)
+                 .resizable(false)
+@@ -1104,12 +1105,12 @@ impl App {
+                 .show(ctx, |ui| {
+                     egui::Grid::new("resize grid").show(ui, |ui| {
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Width: ");
++                            ui.label(tr("Width: "));
+                         });
+                         let w_focus = ui.text_edit_singleline(&mut self.resize.width).has_focus();
+                         ui.end_row();
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Height: ");
++                            ui.label(tr("Height: "));
+                         });
+                         let h_focus = ui.text_edit_singleline(&mut self.resize.height).has_focus();
+                         ui.end_row();
+@@ -1118,13 +1119,13 @@ impl App {
+                         self.resize.height.retain(|c| c.is_ascii_digit());
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Maintain aspect ratio:");
++                            ui.label(tr("Maintain aspect ratio:"));
+                         });
+                         ui.checkbox(&mut self.resize.maintain_aspect_ratio, "");
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Resample: ");
++                            ui.label(tr("Resample: "));
+                         });
+                         let selected = &mut self.resize.resample;
+                         egui::ComboBox::new("filter", "")
+@@ -1183,7 +1184,7 @@ impl App {
+                         ui.with_layout(
+                             egui::Layout::top_down_justified(egui::Align::Center),
+                             |ui| {
+-                                if ui.add(Button::new("Cancel")).clicked() {
++                                if ui.add(Button::new(tr("Cancel"))).clicked() {
+                                     resized = true;
+                                 }
+                             },
+@@ -1195,7 +1196,7 @@ impl App {
+                                 if ui
+                                     .add_enabled(
+                                         width.is_ok() && height.is_ok() && self.view_available(),
+-                                        Button::new("Resize"),
++                                        Button::new(tr("Resize")),
+                                     )
+                                     .clicked()
+                                     || self.enter
+@@ -1224,7 +1225,7 @@ impl App {
+             let size = view.rotated_size();
+             if let Some(rect) = view.crop.rect.as_mut() {
+                 let mut open = true;
+-                egui::Window::new("Crop")
++                egui::Window::new(tr("Crop"))
+                     .id(egui::Id::new("crop window"))
+                     .collapsible(false)
+                     .resizable(false)
+@@ -1256,7 +1257,7 @@ impl App {
+                                 ui.with_layout(
+                                     egui::Layout::right_to_left(egui::Align::RIGHT),
+                                     |ui| {
+-                                        ui.label("Width: ");
++                                        ui.label(tr("Width: "));
+                                     },
+                                 );
+                                 ui.text_edit_singleline(&mut view.crop.width);
+@@ -1264,7 +1265,7 @@ impl App {
+                                 ui.with_layout(
+                                     egui::Layout::right_to_left(egui::Align::RIGHT),
+                                     |ui| {
+-                                        ui.label("Height: ");
++                                        ui.label(tr("Height: "));
+                                     },
+                                 );
+                                 ui.text_edit_singleline(&mut view.crop.height);
+@@ -1315,7 +1316,7 @@ impl App {
+                                     |ui| {
+                                         if ui
+                                             .add(
+-                                                Button::new("Cancel")
++                                                Button::new(tr("Cancel"))
+                                                     .wrap_mode(egui::TextWrapMode::Extend),
+                                             )
+                                             .clicked()
+@@ -1330,7 +1331,7 @@ impl App {
+                                     |ui| {
+                                         if ui
+                                             .add(
+-                                                Button::new("Crop")
++                                                Button::new(tr("Crop"))
+                                                     .wrap_mode(egui::TextWrapMode::Extend),
+                                             )
+                                             .clicked()
+@@ -1473,16 +1474,16 @@ pub fn delete(
+     dialog_proxy: DialogProxy,
+     proxy: EventLoopProxy<UserEvent>,
+ ) {
+-    dialog_proxy.spawn_dialog("Move to trash", move |ui, enter| {
+-        ui.label("Are you sure you want to move this to trash?");
++    dialog_proxy.spawn_dialog(tr("Move to trash"), move |ui, enter| {
++        ui.label(tr("Are you sure you want to move this to trash?"));
+ 
+         ui.with_layout(egui::Layout::left_to_right(egui::Align::LEFT), |ui| {
+-            if ui.button("Yes").clicked() {
++            if ui.button(tr("Yes")).clicked() {
+                 let _ = proxy.send_event(UserEvent::QueueDelete(path.clone()));
+                 return Some(());
+             }
+ 
+-            if ui.button("No").clicked() {
++            if ui.button(tr("No")).clicked() {
+                 return Some(());
+             }
+ 
+@@ -1504,10 +1505,10 @@ fn new_window() {
+ 
+ fn filter_name(filter: &FilterType) -> &'static str {
+     match filter {
+-        FilterType::Nearest => "Nearest Neighbor",
+-        FilterType::Triangle => "Linear Filter",
+-        FilterType::CatmullRom => "Cubic Filter",
+-        FilterType::Gaussian => "Gaussian Filter",
++        FilterType::Nearest => tr("Nearest Neighbor"),
++        FilterType::Triangle => tr("Linear Filter"),
++        FilterType::CatmullRom => tr("Cubic Filter"),
++        FilterType::Gaussian => tr("Gaussian Filter"),
+         FilterType::Lanczos3 => "Lanczos",
+     }
+ }
+diff --git a/src/app/color.rs b/src/app/color.rs
+index 0e16205..9c51587 100644
+--- a/src/app/color.rs
++++ b/src/app/color.rs
+@@ -1,3 +1,4 @@
++use crate::i18n::tr;
+ use cgmath::{EuclideanSpace, Point2};
+ use egui::{Button, Slider};
+ use image::ColorType;
+@@ -10,7 +11,7 @@ impl App {
+         if self.color_visible && self.image_view.is_some() {
+             let mut open = true;
+             let mut closed = false;
+-            egui::Window::new("Color")
++            egui::Window::new(tr("Color"))
+                 .id(egui::Id::new("color window"))
+                 .collapsible(false)
+                 .resizable(false)
+@@ -21,7 +22,7 @@ impl App {
+                 .show(ctx, |ui| {
+                     egui::Grid::new("color grid").show(ui, |ui| {
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Hue: ");
++                            ui.label(tr("Hue: "));
+                         });
+                         ui.add(Slider::new(
+                             &mut self.image_view.as_mut().unwrap().hue,
+@@ -29,7 +30,7 @@ impl App {
+                         ));
+                         ui.end_row();
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Contrast: ");
++                            ui.label(tr("Contrast: "));
+                         });
+                         ui.add(Slider::new(
+                             &mut self.image_view.as_mut().unwrap().contrast,
+@@ -37,7 +38,7 @@ impl App {
+                         ));
+                         ui.end_row();
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Brightness: ");
++                            ui.label(tr("Brightness: "));
+                         });
+                         ui.add(Slider::new(
+                             &mut self.image_view.as_mut().unwrap().brightness,
+@@ -45,7 +46,7 @@ impl App {
+                         ));
+                         ui.end_row();
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Saturation: ");
++                            ui.label(tr("Saturation: "));
+                         });
+                         ui.add(Slider::new(
+                             &mut self.image_view.as_mut().unwrap().saturation,
+@@ -53,12 +54,12 @@ impl App {
+                         ));
+                         ui.end_row();
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Grayscale: ");
++                            ui.label(tr("Grayscale: "));
+                         });
+                         ui.checkbox(&mut self.image_view.as_mut().unwrap().grayscale, "");
+                         ui.end_row();
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Invert: ");
++                            ui.label(tr("Invert: "));
+                         });
+                         ui.checkbox(&mut self.image_view.as_mut().unwrap().invert, "");
+                         ui.end_row();
+@@ -68,7 +69,7 @@ impl App {
+                             egui::Layout::top_down_justified(egui::Align::Center),
+                             |ui| {
+                                 if ui
+-                                    .add_enabled(self.view_available(), Button::new("Cancel"))
++                                    .add_enabled(self.view_available(), Button::new(tr("Cancel")))
+                                     .clicked()
+                                 {
+                                     closed = true;
+@@ -80,7 +81,7 @@ impl App {
+                             egui::Layout::top_down_justified(egui::Align::Center),
+                             |ui| {
+                                 if ui
+-                                    .add_enabled(self.view_available(), Button::new("Apply"))
++                                    .add_enabled(self.view_available(), Button::new(tr("Apply")))
+                                     .clicked()
+                                     || self.enter
+                                 {
+@@ -124,7 +125,7 @@ impl App {
+         if self.color_space_visible && self.image_view.is_some() {
+             let mut open = true;
+             let mut closed = false;
+-            egui::Window::new("Color space")
++            egui::Window::new(tr("Color space"))
+                 .id(egui::Id::new("color space window"))
+                 .collapsible(false)
+                 .resizable(false)
+@@ -135,7 +136,7 @@ impl App {
+                 .show(ctx, |ui| {
+                     egui::Grid::new("color space grid").show(ui, |ui| {
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Colorspace: ");
++                            ui.label(tr("Colorspace: "));
+                         });
+                         let selected = &mut self.color_type;
+                         let color_types = [
+@@ -168,7 +169,7 @@ impl App {
+                             egui::Layout::top_down_justified(egui::Align::Center),
+                             |ui| {
+                                 if ui
+-                                    .add_enabled(self.view_available(), Button::new("Cancel"))
++                                    .add_enabled(self.view_available(), Button::new(tr("Cancel")))
+                                     .clicked()
+                                 {
+                                     closed = true;
+@@ -180,7 +181,7 @@ impl App {
+                             egui::Layout::top_down_justified(egui::Align::Center),
+                             |ui| {
+                                 if ui
+-                                    .add_enabled(self.view_available(), Button::new("Apply"))
++                                    .add_enabled(self.view_available(), Button::new(tr("Apply")))
+                                     .clicked()
+                                     || self.enter
+                                 {
+diff --git a/src/app/help.rs b/src/app/help.rs
+index e621ca1..63d300b 100644
+--- a/src/app/help.rs
++++ b/src/app/help.rs
+@@ -1,3 +1,4 @@
++use crate::i18n::tr;
+ use cgmath::{EuclideanSpace, Point2};
+ use egui::RichText;
+ 
+@@ -7,7 +8,7 @@ impl App {
+     pub fn help_ui(&mut self, ctx: &egui::Context) {
+         if self.help_visible {
+             let mut open = true;
+-            egui::Window::new("Help")
++            egui::Window::new(tr("Help"))
+                 .id(egui::Id::new("help window"))
+                 .collapsible(false)
+                 .resizable(false)
+@@ -47,12 +48,12 @@ impl App {
+                                 ("Toggle zen mode", "Ctrl + I"),
+                             ];
+ 
+-                            ui.label(RichText::new("Action").strong());
+-                            ui.label(RichText::new("Hotkey").strong());
++                            ui.label(RichText::new(tr("Action")).strong());
++                            ui.label(RichText::new(tr("Hotkey")).strong());
+                             ui.end_row();
+                             for (action, hotkey) in HELP {
+-                                ui.label(*action);
+-                                ui.label(*hotkey);
++                                ui.label(tr(action));
++                                ui.label(tr(hotkey));
+                                 ui.end_row();
+                             }
+                         });
+diff --git a/src/app/load_image.rs b/src/app/load_image.rs
+index 4904653..7382a2d 100644
+--- a/src/app/load_image.rs
++++ b/src/app/load_image.rs
+@@ -1,3 +1,4 @@
++use crate::i18n::tr;
+ use std::{
+     error, fmt, fs,
+     path::{Path, PathBuf},
+@@ -51,12 +52,12 @@ pub fn open(proxy: EventLoopProxy<UserEvent>, wgpu: &WgpuState, folder: bool) {
+     let raw: Vec<_> = RAW.iter().copied().collect();
+     let dialog = rfd::FileDialog::new()
+         .set_parent(&wgpu.window)
+-        .add_filter("All", &ext)
++        .add_filter(tr("All"), &ext)
+         .add_filter("png", &["png", "apng"])
+         .add_filter("svg", &["svg"])
+         .add_filter("jpeg", &["jpg", "jpeg", "jpe", "jif", "jfif"])
+         .add_filter("Photoshop", &["psd"])
+-        .add_filter("Animated", &["apng", "gif", "webp"])
++        .add_filter(tr("Animated"), &["apng", "gif", "webp"])
+         .add_filter("Raw", &raw);
+     thread::spawn(move || {
+         let pick = if folder {
+diff --git a/src/app/menu_bar.rs b/src/app/menu_bar.rs
+index 01ad096..f14943f 100644
+--- a/src/app/menu_bar.rs
++++ b/src/app/menu_bar.rs
+@@ -1,3 +1,4 @@
++use crate::i18n::tr;
+ use std::fs;
+ 
+ use super::{App, TOP_BAR_SIZE, load_image, new_window, op_queue::Op, save_image};
+@@ -9,16 +10,16 @@ impl App {
+             .exact_size(TOP_BAR_SIZE)
+             .show(ui, |ui| {
+                 egui::MenuBar::new().ui(ui, |ui| {
+-                    ui.menu_button("File", |ui| {
++                    ui.menu_button(tr("File"), |ui| {
+                         if ui
+-                            .add(egui::Button::new("Open").shortcut_text("Ctrl + O"))
++                            .add(egui::Button::new(tr("Open")).shortcut_text("Ctrl + O"))
+                             .clicked()
+                         {
+                             load_image::open(self.proxy.clone(), wgpu, false);
+                             ui.close();
+                         }
+ 
+-                        if ui.add(egui::Button::new("Open folder")).clicked() {
++                        if ui.add(egui::Button::new(tr("Open folder"))).clicked() {
+                             load_image::open(self.proxy.clone(), wgpu, true);
+                             ui.close();
+                         }
+@@ -26,7 +27,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Save as").shortcut_text("Ctrl + S"),
++                                egui::Button::new(tr("Save as")).shortcut_text("Ctrl + S"),
+                             )
+                             .clicked()
+                         {
+@@ -41,7 +42,7 @@ impl App {
+                         ui.separator();
+ 
+                         if ui
+-                            .add(egui::Button::new("New Window").shortcut_text("Ctrl + N"))
++                            .add(egui::Button::new(tr("New Window")).shortcut_text("Ctrl + N"))
+                             .clicked()
+                         {
+                             new_window();
+@@ -51,7 +52,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Reload").shortcut_text("F5"),
++                                egui::Button::new(tr("Reload")).shortcut_text("F5"),
+                             )
+                             .clicked()
+                         {
+@@ -67,7 +68,7 @@ impl App {
+                         ui.separator();
+ 
+                         if ui
+-                            .add(egui::Button::new("Exit").shortcut_text("Ctrl + W"))
++                            .add(egui::Button::new(tr("Exit")).shortcut_text("Ctrl + W"))
+                             .clicked()
+                         {
+                             let _ = self.proxy.send_event(UserEvent::Exit);
+@@ -75,11 +76,11 @@ impl App {
+                         }
+                     });
+ 
+-                    ui.menu_button("Edit", |ui| {
++                    ui.menu_button(tr("Edit"), |ui| {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Undo").shortcut_text("Ctrl + Z"),
++                                egui::Button::new(tr("Undo")).shortcut_text("Ctrl + Z"),
+                             )
+                             .clicked()
+                         {
+@@ -90,7 +91,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Redo").shortcut_text("Ctrl + Y"),
++                                egui::Button::new(tr("Redo")).shortcut_text("Ctrl + Y"),
+                             )
+                             .clicked()
+                         {
+@@ -103,7 +104,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Copy").shortcut_text("Ctrl + C"),
++                                egui::Button::new(tr("Copy")).shortcut_text("Ctrl + C"),
+                             )
+                             .clicked()
+                         {
+@@ -114,7 +115,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Paste").shortcut_text("Ctrl + V"),
++                                egui::Button::new(tr("Paste")).shortcut_text("Ctrl + V"),
+                             )
+                             .clicked()
+                         {
+@@ -124,17 +125,17 @@ impl App {
+ 
+                         ui.separator();
+ 
+-                        if ui.add(egui::Button::new("Preferences")).clicked() {
++                        if ui.add(egui::Button::new(tr("Preferences"))).clicked() {
+                             self.preferences_visible = true;
+                             ui.close();
+                         }
+                     });
+ 
+-                    ui.menu_button("Image", |ui| {
++                    ui.menu_button(tr("Image"), |ui| {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Rotate Left").shortcut_text("Q"),
++                                egui::Button::new(tr("Rotate Left")).shortcut_text("Q"),
+                             )
+                             .clicked()
+                         {
+@@ -145,7 +146,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Rotate Right").shortcut_text("E"),
++                                egui::Button::new(tr("Rotate Right")).shortcut_text("E"),
+                             )
+                             .clicked()
+                         {
+@@ -158,7 +159,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Flip Horizontal"),
++                                egui::Button::new(tr("Flip Horizontal")),
+                             )
+                             .clicked()
+                         {
+@@ -167,7 +168,7 @@ impl App {
+                         }
+ 
+                         if ui
+-                            .add_enabled(self.view_available(), egui::Button::new("Flip Vertical"))
++                            .add_enabled(self.view_available(), egui::Button::new(tr("Flip Vertical")))
+                             .clicked()
+                         {
+                             self.queue(Op::FlipVertical);
+@@ -179,7 +180,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Zoom in").shortcut_text("+"),
++                                egui::Button::new(tr("Zoom in")).shortcut_text("+"),
+                             )
+                             .clicked()
+                         {
+@@ -190,7 +191,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Zoom out").shortcut_text("-"),
++                                egui::Button::new(tr("Zoom out")).shortcut_text("-"),
+                             )
+                             .clicked()
+                         {
+@@ -203,7 +204,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Best fit").shortcut_text("Ctrl + B"),
++                                egui::Button::new(tr("Best fit")).shortcut_text("Ctrl + B"),
+                             )
+                             .clicked()
+                         {
+@@ -214,7 +215,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Largest fit").shortcut_text("Ctrl + L"),
++                                egui::Button::new(tr("Largest fit")).shortcut_text("Ctrl + L"),
+                             )
+                             .clicked()
+                         {
+@@ -225,7 +226,7 @@ impl App {
+                         ui.separator();
+ 
+                         if ui
+-                            .add_enabled(self.image_view.is_some(), egui::Button::new("Color"))
++                            .add_enabled(self.image_view.is_some(), egui::Button::new(tr("Color")))
+                             .clicked()
+                         {
+                             self.color_visible = true;
+@@ -235,7 +236,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Color space"),
++                                egui::Button::new(tr("Color space")),
+                             )
+                             .clicked()
+                         {
+@@ -246,7 +247,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.view_available(),
+-                                egui::Button::new("Crop").shortcut_text("Ctrl + X"),
++                                egui::Button::new(tr("Crop")).shortcut_text("Ctrl + X"),
+                             )
+                             .clicked()
+                         {
+@@ -257,7 +258,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Resize").shortcut_text("Ctrl + R"),
++                                egui::Button::new(tr("Resize")).shortcut_text("Ctrl + R"),
+                             )
+                             .clicked()
+                         {
+@@ -279,7 +280,7 @@ impl App {
+                                         .unwrap()
+                                         .metadata
+                                         .is_empty(),
+-                                egui::Button::new("Metadata"),
++                                egui::Button::new(tr("Metadata")),
+                             )
+                             .clicked()
+                         {
+@@ -291,7 +292,7 @@ impl App {
+                         if ui
+                             .add_enabled(
+                                 self.image_view.is_some(),
+-                                egui::Button::new("Move to trash").shortcut_text("Delete"),
++                                egui::Button::new(tr("Move to trash")).shortcut_text("Delete"),
+                             )
+                             .clicked()
+                         {
+@@ -308,13 +309,13 @@ impl App {
+                         }
+                     });
+ 
+-                    ui.menu_button("Help", |ui| {
+-                        if ui.add(egui::Button::new("Repository")).clicked() {
++                    ui.menu_button(tr("Help"), |ui| {
++                        if ui.add(egui::Button::new(tr("Repository"))).clicked() {
+                             let _ = opener::open("https://github.com/Kl4rry/simp");
+                             ui.close();
+                         }
+ 
+-                        if ui.add(egui::Button::new("Report Bug")).clicked() {
++                        if ui.add(egui::Button::new(tr("Report Bug"))).clicked() {
+                             let _ = opener::open("https://github.com/Kl4rry/simp/issues");
+                             ui.close();
+                         }
+@@ -322,7 +323,7 @@ impl App {
+                         ui.separator();
+ 
+                         if ui
+-                            .add(egui::Button::new("Help").shortcut_text("Ctrl + H"))
++                            .add(egui::Button::new(tr("Help")).shortcut_text("Ctrl + H"))
+                             .clicked()
+                         {
+                             self.help_visible = true;
+@@ -331,7 +332,7 @@ impl App {
+ 
+                         ui.separator();
+ 
+-                        if ui.add(egui::Button::new("Third-party Software")).clicked()
++                        if ui.add(egui::Button::new(tr("Third-party Software"))).clicked()
+                             && let Err(err) = open_licenes()
+                         {
+                             let _ = self
+@@ -339,24 +340,29 @@ impl App {
+                                 .send_event(UserEvent::ErrorMessage(err.to_string()));
+                         }
+ 
+-                        if ui.add(egui::Button::new("About")).clicked() {
++                        if ui.add(egui::Button::new(tr("About"))).clicked() {
+                             let adapter_info = wgpu.adapter.get_info();
+ 
+                             let about = format!(
+-                                "{}\n{}\nVersion: {}\nCommit: {}\nWindow platform: {}\nGPU Backend: {}\nGPU: {}\nDriver: {} {}",
++                                "{}\n{}\n{}: {}\n{}: {}\n{}: {}\n{}: {}\nGPU: {}\n{}: {} {}",
+                                 env!("CARGO_PKG_NAME"),
+                                 env!("CARGO_PKG_DESCRIPTION"),
++                                tr("Version"),
+                                 env!("CARGO_PKG_VERSION"),
++                                tr("Commit"),
+                                 env!("GIT_HASH"),
++                                tr("Window platform"),
+                                 self.window_platform,
++                                tr("GPU Backend"),
+                                 adapter_info.backend,
+                                 adapter_info.name,
++                                tr("Driver"),
+                                 adapter_info.driver,
+                                 adapter_info.driver_info
+                             );
+ 
+                             self.dialog_manager.get_proxy().spawn_dialog(
+-                                "About",
++                                tr("About"),
+                                 move |ui, enter| -> Option<()> {
+                                     ui.label(&about);
+ 
+@@ -365,7 +371,7 @@ impl App {
+                                         return Some(());
+                                     }
+ 
+-                                    ui.button("Ok").clicked().then_some(())
++                                    ui.button(tr("Ok")).clicked().then_some(())
+                                 },
+                             );
+ 
+diff --git a/src/app/metadata.rs b/src/app/metadata.rs
+index dc4cd0c..d5807dc 100644
+--- a/src/app/metadata.rs
++++ b/src/app/metadata.rs
+@@ -1,3 +1,4 @@
++use crate::i18n::tr;
+ use cgmath::{EuclideanSpace, Point2};
+ use egui::{RichText, ScrollArea};
+ 
+@@ -7,7 +8,7 @@ impl App {
+     pub fn metadata_ui(&mut self, ctx: &egui::Context) {
+         if self.metadata_visible && self.image_view.is_some() {
+             let mut open = true;
+-            egui::Window::new("Metadata")
++            egui::Window::new(tr("Metadata"))
+                 .id(egui::Id::new("metadata window"))
+                 .collapsible(false)
+                 .resizable(true)
+@@ -20,7 +21,7 @@ impl App {
+                         let guard = self.image_view.as_ref().unwrap().image_data.read().unwrap();
+                         if guard.metadata.is_empty() {
+                             ui.centered_and_justified(|ui| {
+-                                ui.label(RichText::new("Could not find any metadata.").size(20.0));
++                                ui.label(RichText::new(tr("Could not find any metadata.")).size(20.0));
+                             });
+                         } else {
+                             egui::Grid::new("metadata grid")
+diff --git a/src/app/op_queue.rs b/src/app/op_queue.rs
+index e575dcb..09d7fea 100644
+--- a/src/app/op_queue.rs
++++ b/src/app/op_queue.rs
+@@ -1,3 +1,4 @@
++use crate::i18n::tr;
+ use std::{
+     collections::HashSet,
+     fs,
+@@ -186,18 +187,18 @@ impl OpQueue {
+                     if self.stack.is_edited() {
+                         thread::spawn(move || {
+                             let close = dialog_proxy
+-                                .spawn_dialog("Unsaved changes", move |ui, enter| {
++                                .spawn_dialog(tr("Unsaved changes"), move |ui, enter| {
+                                     ui.label(
+-                            "You have unsaved changes are you sure you want to close this image?",
++                            tr("You have unsaved changes are you sure you want to close this image?"),
+                         );
+                                     ui.with_layout(
+                                         egui::Layout::left_to_right(egui::Align::LEFT),
+                                         |ui| {
+-                                            if ui.button("Ok").clicked() {
++                                            if ui.button(tr("Ok")).clicked() {
+                                                 return Some(true);
+                                             }
+ 
+-                                            if ui.button("Cancel").clicked() {
++                                            if ui.button(tr("Cancel")).clicked() {
+                                                 return Some(false);
+                                             }
+ 
+@@ -403,17 +404,17 @@ impl OpQueue {
+ 
+             if edited_prompt {
+                 let close = dialog_proxy
+-                    .spawn_dialog("Unsaved changes", move |ui, enter| {
++                    .spawn_dialog(tr("Unsaved changes"), move |ui, enter| {
+                         ui.label(
+-                            "You have unsaved changes are you sure you want to close this image?",
++                            tr("You have unsaved changes are you sure you want to close this image?"),
+                         );
+ 
+                         ui.with_layout(egui::Layout::left_to_right(egui::Align::LEFT), |ui| {
+-                            if ui.button("Ok").clicked() {
++                            if ui.button(tr("Ok")).clicked() {
+                                 return Some(true);
+                             }
+ 
+-                            if ui.button("Cancel").clicked() {
++                            if ui.button(tr("Cancel")).clicked() {
+                                 return Some(false);
+                             }
+ 
+diff --git a/src/app/preferences.rs b/src/app/preferences.rs
+index eb2bb18..25d1871 100644
+--- a/src/app/preferences.rs
++++ b/src/app/preferences.rs
+@@ -1,3 +1,4 @@
++use crate::i18n::tr;
+ use std::sync::Mutex;
+ 
+ use cgmath::{EuclideanSpace, Point2};
+@@ -22,12 +23,12 @@ pub enum SortOrder {
+ impl AsRef<str> for SortOrder {
+     fn as_ref(&self) -> &str {
+         match self {
+-            Self::AccessTime => "Accessed",
+-            Self::CreatedTime => "Created",
+-            Self::MetadataTime => "Date (from exif)",
+-            Self::ModifiedTime => "Modified",
+-            Self::Name => "Name",
+-            Self::Size => "Size",
++            Self::AccessTime => tr("Accessed"),
++            Self::CreatedTime => tr("Created"),
++            Self::MetadataTime => tr("Date (from exif)"),
++            Self::ModifiedTime => tr("Modified"),
++            Self::Name => tr("Name"),
++            Self::Size => tr("Size"),
+         }
+     }
+ }
+@@ -44,18 +45,18 @@ impl SortDirection {
+         use SortDirection::*;
+         use SortOrder::*;
+         match (self, sort_order) {
+-            (Forward, AccessTime) => "Newest first",
+-            (Backward, AccessTime) => "Oldest first",
+-            (Forward, CreatedTime) => "Newest first",
+-            (Backward, CreatedTime) => "Oldest first",
+-            (Forward, MetadataTime) => "Newest first",
+-            (Backward, MetadataTime) => "Oldest first",
+-            (Forward, ModifiedTime) => "Newest first",
+-            (Backward, ModifiedTime) => "Oldest first",
+-            (Forward, Name) => "A-Z",
+-            (Backward, Name) => "Z-A",
+-            (Forward, Size) => "Smallest first",
+-            (Backward, Size) => "Largest first",
++            (Forward, AccessTime) => tr("Newest first"),
++            (Backward, AccessTime) => tr("Oldest first"),
++            (Forward, CreatedTime) => tr("Newest first"),
++            (Backward, CreatedTime) => tr("Oldest first"),
++            (Forward, MetadataTime) => tr("Newest first"),
++            (Backward, MetadataTime) => tr("Oldest first"),
++            (Forward, ModifiedTime) => tr("Newest first"),
++            (Backward, ModifiedTime) => tr("Oldest first"),
++            (Forward, Name) => tr("A-Z"),
++            (Backward, Name) => tr("Z-A"),
++            (Forward, Size) => tr("Smallest first"),
++            (Backward, Size) => tr("Largest first"),
+         }
+     }
+ }
+@@ -111,7 +112,7 @@ impl App {
+             let mut preferences = PREFERENCES.lock().unwrap().clone();
+ 
+             let mut open = true;
+-            egui::Window::new("Preferences")
++            egui::Window::new(tr("Preferences"))
+                 .id(egui::Id::new("preferences window"))
+                 .collapsible(false)
+                 .resizable(false)
+@@ -122,43 +123,43 @@ impl App {
+                 .show(ctx, |ui| {
+                     egui::Grid::new("preferences grid").show(ui, |ui| {
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Open in fullscreen: ");
++                            ui.label(tr("Open in fullscreen: "));
+                         });
+                         ui.add(egui::Checkbox::new(&mut preferences.open_in_fullscreen, ""));
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Automatically center image: ");
++                            ui.label(tr("Automatically center image: "));
+                         });
+                         ui.add(egui::Checkbox::new(&mut preferences.auto_center, ""));
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Zoom Speed: ");
++                            ui.label(tr("Zoom Speed: "));
+                         });
+                         ui.add(egui::Slider::new(&mut preferences.zoom_speed, 0.001..=10.0));
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Minimum svg size: ");
++                            ui.label(tr("Minimum svg size: "));
+                         });
+                         ui.add(egui::Slider::new(&mut preferences.min_svg_size, 0..=10000));
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("JPEG quality: ");
++                            ui.label(tr("JPEG quality: "));
+                         });
+                         ui.add(egui::Slider::new(&mut preferences.jpeg_quality, 1..=100));
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("WebP lossy compression: ");
++                            ui.label(tr("WebP lossy compression: "));
+                         });
+                         ui.add(egui::Checkbox::new(&mut preferences.webp_lossy, ""));
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("WebP quality: ");
++                            ui.label(tr("WebP quality: "));
+                         });
+                         ui.add(egui::Slider::new(
+                             &mut preferences.webp_quality,
+@@ -167,19 +168,19 @@ impl App {
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("JPEG XL lossy compression: ");
++                            ui.label(tr("JPEG XL lossy compression: "));
+                         });
+                         ui.add(egui::Checkbox::new(&mut preferences.jxl_lossy, ""));
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("JPEG XL quality: ");
++                            ui.label(tr("JPEG XL quality: "));
+                         });
+                         ui.add(egui::Slider::new(&mut preferences.jxl_quality, 0.0..=15.0));
+                         ui.end_row();
+ 
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Sort order: ");
++                            ui.label(tr("Sort order: "));
+                         });
+                         egui::ComboBox::new("sort by combobox", "")
+                             .selected_text(preferences.sort_order.as_ref())
+@@ -202,7 +203,7 @@ impl App {
+                             });
+                         ui.end_row();
+                         ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                            ui.label("Sort direction: ");
++                            ui.label(tr("Sort direction: "));
+                         });
+                         egui::ComboBox::new("sort direction combobox", "")
+                             .selected_text(
+@@ -224,7 +225,7 @@ impl App {
+ 
+                         ui.end_row();
+                         ui.end_row();
+-                        if ui.button("Reset to default").clicked() {
++                        if ui.button(tr("Reset to default")).clicked() {
+                             preferences = Default::default();
+                         }
+                     });
+diff --git a/src/app/save_image.rs b/src/app/save_image.rs
+index fa860b5..6f13b39 100644
+--- a/src/app/save_image.rs
++++ b/src/app/save_image.rs
+@@ -1,3 +1,4 @@
++use crate::i18n::tr;
+ use std::{
+     path::PathBuf,
+     sync::{Arc, RwLock},
+@@ -150,12 +151,12 @@ pub fn save(
+ 
+ pub fn get_jpeg_quality(dialog_proxy: DialogProxy) -> Option<u8> {
+     dialog_proxy
+-        .spawn_dialog("Export settings", |ui, enter| {
++        .spawn_dialog(tr("Export settings"), |ui, enter| {
+             let mut preferences = PREFERENCES.lock().unwrap();
+             let mut output = None;
+             egui::Grid::new("jpeg export settings grid").show(ui, |ui| {
+                 ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                    ui.label("Jpeg Quality: ");
++                    ui.label(tr("Jpeg Quality: "));
+                 });
+                 ui.add(egui::Slider::new(&mut preferences.jpeg_quality, 1..=100));
+                 ui.end_row();
+@@ -163,7 +164,7 @@ pub fn get_jpeg_quality(dialog_proxy: DialogProxy) -> Option<u8> {
+                 ui.with_layout(
+                     egui::Layout::top_down_justified(egui::Align::Center),
+                     |ui| {
+-                        if ui.button("Save").clicked() {
++                        if ui.button(tr("Save")).clicked() {
+                             output = Some(Some(preferences.jpeg_quality))
+                         }
+                     },
+@@ -172,7 +173,7 @@ pub fn get_jpeg_quality(dialog_proxy: DialogProxy) -> Option<u8> {
+                 ui.with_layout(
+                     egui::Layout::top_down_justified(egui::Align::Center),
+                     |ui| {
+-                        if ui.button("Cancel").clicked() {
++                        if ui.button(tr("Cancel")).clicked() {
+                             output = Some(None);
+                         }
+                     },
+@@ -191,18 +192,18 @@ pub fn get_jpeg_quality(dialog_proxy: DialogProxy) -> Option<u8> {
+ 
+ pub fn get_webp_quality(dialog_proxy: DialogProxy) -> Option<(f32, bool)> {
+     dialog_proxy
+-        .spawn_dialog("Export settings", |ui, enter| {
++        .spawn_dialog(tr("Export settings"), |ui, enter| {
+             let mut preferences = PREFERENCES.lock().unwrap();
+             let mut output = None;
+             egui::Grid::new("webp export settings grid").show(ui, |ui| {
+                 ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                    ui.label("WebP lossy compression: ");
++                    ui.label(tr("WebP lossy compression: "));
+                 });
+                 ui.add(egui::Checkbox::new(&mut preferences.webp_lossy, ""));
+                 ui.end_row();
+ 
+                 ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                    ui.label("Webp Quality: ");
++                    ui.label(tr("Webp Quality: "));
+                 });
+                 ui.add(egui::Slider::new(
+                     &mut preferences.webp_quality,
+@@ -213,7 +214,7 @@ pub fn get_webp_quality(dialog_proxy: DialogProxy) -> Option<(f32, bool)> {
+                 ui.with_layout(
+                     egui::Layout::top_down_justified(egui::Align::Center),
+                     |ui| {
+-                        if ui.button("Save").clicked() {
++                        if ui.button(tr("Save")).clicked() {
+                             output = Some(Some((preferences.webp_quality, preferences.webp_lossy)))
+                         }
+                     },
+@@ -222,7 +223,7 @@ pub fn get_webp_quality(dialog_proxy: DialogProxy) -> Option<(f32, bool)> {
+                 ui.with_layout(
+                     egui::Layout::top_down_justified(egui::Align::Center),
+                     |ui| {
+-                        if ui.button("Cancel").clicked() {
++                        if ui.button(tr("Cancel")).clicked() {
+                             output = Some(None);
+                         }
+                     },
+@@ -242,18 +243,18 @@ pub fn get_webp_quality(dialog_proxy: DialogProxy) -> Option<(f32, bool)> {
+ #[cfg(feature = "jxl")]
+ pub fn get_jxl_quality(dialog_proxy: DialogProxy) -> Option<(f32, bool)> {
+     dialog_proxy
+-        .spawn_dialog("Export settings", |ui, enter| {
++        .spawn_dialog(tr("Export settings"), |ui, enter| {
+             let mut preferences = PREFERENCES.lock().unwrap();
+             let mut output = None;
+             egui::Grid::new("jxl export settings grid").show(ui, |ui| {
+                 ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                    ui.label("JPEG XL lossy compression: ");
++                    ui.label(tr("JPEG XL lossy compression: "));
+                 });
+                 ui.add(egui::Checkbox::new(&mut preferences.jxl_lossy, ""));
+                 ui.end_row();
+ 
+                 ui.with_layout(egui::Layout::right_to_left(egui::Align::RIGHT), |ui| {
+-                    ui.label("JPEG XL Quality: ");
++                    ui.label(tr("JPEG XL Quality: "));
+                 });
+                 ui.add(egui::Slider::new(&mut preferences.jxl_quality, 0.0..=15.0));
+                 ui.end_row();
+@@ -261,7 +262,7 @@ pub fn get_jxl_quality(dialog_proxy: DialogProxy) -> Option<(f32, bool)> {
+                 ui.with_layout(
+                     egui::Layout::top_down_justified(egui::Align::Center),
+                     |ui| {
+-                        if ui.button("Save").clicked() {
++                        if ui.button(tr("Save")).clicked() {
+                             output = Some(Some((preferences.jxl_quality, preferences.jxl_lossy)))
+                         }
+                     },
+@@ -270,7 +271,7 @@ pub fn get_jxl_quality(dialog_proxy: DialogProxy) -> Option<(f32, bool)> {
+                 ui.with_layout(
+                     egui::Layout::top_down_justified(egui::Align::Center),
+                     |ui| {
+-                        if ui.button("Cancel").clicked() {
++                        if ui.button(tr("Cancel")).clicked() {
+                             output = Some(None);
+                         }
+                     },
+diff --git a/src/i18n.rs b/src/i18n.rs
+new file mode 100644
+index 0000000..421c746
+--- /dev/null
++++ b/src/i18n.rs
+@@ -0,0 +1,208 @@
++//! Shabnam: Chinese and Russian interface text. Upstream Simp is English only.
++//!
++//! `tr("English text")` gives the text in the language of the session (LC_ALL, LC_MESSAGES or
++//! LANG, in that order: zh* = Simplified Chinese, ru* = Russian) and the English text itself for
++//! every other language and for a text that is not in the table. The English text is the key, so
++//! the rest of the program reads as before with `tr(..)` around what is shown.
++//!
++//! `add_cjk_font` gives egui a face with Chinese characters (its built-in faces have Latin and
++//! Cyrillic only), for the interface and for file names, in every language.
++
++use std::{collections::HashMap, sync::OnceLock};
++
++#[derive(Clone, Copy, PartialEq)]
++enum Lang {
++    En,
++    Zh,
++    Ru,
++}
++
++fn lang() -> Lang {
++    static LANG: OnceLock<Lang> = OnceLock::new();
++    *LANG.get_or_init(|| {
++        let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
++            .iter()
++            .filter_map(|name| std::env::var(name).ok())
++            .find(|value| !value.is_empty())
++            .unwrap_or_default();
++        if locale.starts_with("zh") {
++            Lang::Zh
++        } else if locale.starts_with("ru") {
++            Lang::Ru
++        } else {
++            Lang::En
++        }
++    })
++}
++
++pub fn tr(english: &'static str) -> &'static str {
++    static TABLE: OnceLock<HashMap<&'static str, (&'static str, &'static str)>> = OnceLock::new();
++    let lang = lang();
++    if lang == Lang::En {
++        return english;
++    }
++    let table = TABLE.get_or_init(|| TEXTS.iter().map(|&(en, zh, ru)| (en, (zh, ru))).collect());
++    match table.get(english) {
++        Some(&(zh, _)) if lang == Lang::Zh => zh,
++        Some(&(_, ru)) if lang == Lang::Ru => ru,
++        _ => english,
++    }
++}
++
++/// Noto Sans CJK as the last face of both egui font families. The file is a collection: faces
++/// 0 to 4 are Japanese, Korean, Simplified Chinese, Traditional Chinese, Hong Kong.
++pub fn add_cjk_font(ctx: &egui::Context) {
++    const FILES: &[&str] = &[
++        "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
++        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
++        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
++    ];
++    let Some(bytes) = FILES.iter().find_map(|file| std::fs::read(file).ok()) else {
++        return;
++    };
++    let mut data = egui::FontData::from_owned(bytes);
++    data.index = 2;
++    let mut fonts = egui::FontDefinitions::default();
++    fonts.font_data.insert("cjk".to_owned(), data.into());
++    for family in fonts.families.values_mut() {
++        family.push("cjk".to_owned());
++    }
++    ctx.set_fonts(fonts);
++}
++
++/// (English, Simplified Chinese, Russian)
++#[rustfmt::skip]
++const TEXTS: &[(&str, &str, &str)] = &[
++    // Menu bar and the picture's context menu
++    ("File", "文件", "Файл"),
++    ("Open", "打开", "Открыть"),
++    ("Open folder", "打开文件夹", "Открыть папку"),
++    ("Save as", "另存为", "Сохранить как"),
++    ("New Window", "新建窗口", "Новое окно"),
++    ("Reload", "重新加载", "Перезагрузить"),
++    ("Exit", "退出", "Выход"),
++    ("Edit", "编辑", "Правка"),
++    ("Undo", "撤销", "Отменить"),
++    ("Redo", "重做", "Повторить"),
++    ("Copy", "复制", "Копировать"),
++    ("Paste", "粘贴", "Вставить"),
++    ("Preferences", "首选项", "Настройки"),
++    ("Image", "图像", "Изображение"),
++    ("Rotate Left", "向左旋转", "Повернуть влево"),
++    ("Rotate Right", "向右旋转", "Повернуть вправо"),
++    ("Flip Horizontal", "水平翻转", "Отразить по горизонтали"),
++    ("Flip Vertical", "垂直翻转", "Отразить по вертикали"),
++    ("Zoom in", "放大", "Увеличить"),
++    ("Zoom out", "缩小", "Уменьшить"),
++    ("Best fit", "适应窗口", "Вписать в окно"),
++    ("Largest fit", "放大至窗口", "Растянуть до окна"),
++    ("Color", "颜色", "Цвет"),
++    ("Color space", "色彩空间", "Цветовое пространство"),
++    ("Crop", "裁剪", "Обрезать"),
++    ("Resize", "调整大小", "Изменить размер"),
++    ("Metadata", "元数据", "Метаданные"),
++    ("Move to trash", "移到回收站", "Переместить в корзину"),
++    ("Help", "帮助", "Справка"),
++    ("Repository", "代码仓库", "Репозиторий"),
++    ("Report Bug", "报告问题", "Сообщить об ошибке"),
++    ("Third-party Software", "第三方软件", "Сторонние программы"),
++    ("About", "关于", "О программе"),
++    ("Next", "下一张", "Следующее"),
++    ("Previous", "上一张", "Предыдущее"),
++    ("Sort by", "排序方式", "Сортировка"),
++    // Buttons
++    ("Ok", "确定", "ОК"),
++    ("Cancel", "取消", "Отмена"),
++    ("Yes", "是", "Да"),
++    ("No", "否", "Нет"),
++    ("Apply", "应用", "Применить"),
++    ("Save", "保存", "Сохранить"),
++    ("Reset to default", "恢复默认设置", "Сбросить настройки"),
++    // Empty window, status bar
++    ("Open File: Ctrl + O\n\nPaste: Ctrl + V\n\nHelp: Ctrl + H",
++     "打开文件：Ctrl + O\n\n粘贴：Ctrl + V\n\n帮助：Ctrl + H",
++     "Открыть файл: Ctrl + O\n\nВставить: Ctrl + V\n\nСправка: Ctrl + H"),
++    ("Zoom", "缩放", "Масштаб"),
++    // Help window. Upstream has two rows the wrong way round ("Zoom in" beside "-", and the
++    // "F11 or F" row with its columns swapped); the translations say what the keys do.
++    ("Action", "操作", "Действие"),
++    ("Hotkey", "快捷键", "Клавиши"),
++    ("Open image", "打开图片", "Открыть изображение"),
++    ("Reload image", "重新加载图片", "Перезагрузить изображение"),
++    ("Close image", "关闭图片", "Закрыть изображение"),
++    ("Quit", "退出", "Выйти"),
++    ("New window", "新建窗口", "Новое окно"),
++    ("Rotate left", "向左旋转", "Повернуть влево"),
++    ("Rotate right", "向右旋转", "Повернуть вправо"),
++    ("- or Mousewheel up", "+ 或向上滚动滚轮", "+ или колесо мыши вверх"),
++    ("+ or Mousewheel down", "- 或向下滚动滚轮", "- или колесо мыши вниз"),
++    ("F11 or F", "全屏", "Во весь экран"),
++    ("Fullscreen", "F11 或 F", "F11 или F"),
++    ("100% - 900% Zoom", "缩放 100% - 900%", "Масштаб 100% - 900%"),
++    ("Previous image", "上一张图片", "Предыдущее изображение"),
++    ("Next image", "下一张图片", "Следующее изображение"),
++    ("A or L or Left Arrow", "A、L 或左方向键", "A, L или стрелка влево"),
++    ("D or H or Right Arrow", "D、H 或右方向键", "D, H или стрелка вправо"),
++    ("Toggle zen mode", "隐藏或显示菜单栏和状态栏", "Скрыть или показать панели"),
++    // Preferences
++    ("Open in fullscreen: ", "以全屏方式打开：", "Открывать во весь экран: "),
++    ("Automatically center image: ", "自动居中图片：", "Центрировать изображение: "),
++    ("Zoom Speed: ", "缩放速度：", "Скорость масштабирования: "),
++    ("Minimum svg size: ", "SVG 最小尺寸：", "Минимальный размер SVG: "),
++    ("JPEG quality: ", "JPEG 质量：", "Качество JPEG: "),
++    ("WebP lossy compression: ", "WebP 有损压缩：", "Сжатие WebP с потерями: "),
++    ("WebP quality: ", "WebP 质量：", "Качество WebP: "),
++    ("JPEG XL lossy compression: ", "JPEG XL 有损压缩：", "Сжатие JPEG XL с потерями: "),
++    ("JPEG XL quality: ", "JPEG XL 质量：", "Качество JPEG XL: "),
++    ("Sort order: ", "排序依据：", "Сортировать по: "),
++    ("Sort direction: ", "排序方向：", "Порядок: "),
++    ("Accessed", "访问时间", "Дата доступа"),
++    ("Created", "创建时间", "Дата создания"),
++    ("Date (from exif)", "拍摄时间（EXIF）", "Дата съёмки (EXIF)"),
++    ("Modified", "修改时间", "Дата изменения"),
++    ("Name", "名称", "Имя"),
++    ("Size", "大小", "Размер"),
++    ("Newest first", "从新到旧", "Сначала новые"),
++    ("Oldest first", "从旧到新", "Сначала старые"),
++    ("A-Z", "A-Z", "А-Я"),
++    ("Z-A", "Z-A", "Я-А"),
++    ("Smallest first", "从小到大", "Сначала маленькие"),
++    ("Largest first", "从大到小", "Сначала большие"),
++    // Dialogs
++    ("Error", "错误", "Ошибка"),
++    ("Unsaved changes", "未保存的更改", "Несохранённые изменения"),
++    ("You have unsaved changes are you sure you want to close this image?",
++     "有未保存的更改，确定要关闭这张图片吗？",
++     "Есть несохранённые изменения. Закрыть это изображение?"),
++    ("Are you sure you want to move this to trash?", "确定要把它移到回收站吗？", "Переместить это в корзину?"),
++    ("Could not find any metadata.", "没有找到元数据。", "Метаданные не найдены."),
++    ("Export settings", "导出设置", "Параметры экспорта"),
++    ("Jpeg Quality: ", "JPEG 质量：", "Качество JPEG: "),
++    ("Webp Quality: ", "WebP 质量：", "Качество WebP: "),
++    ("JPEG XL Quality: ", "JPEG XL 质量：", "Качество JPEG XL: "),
++    // Resize, crop, colour
++    ("Width: ", "宽度：", "Ширина: "),
++    ("Height: ", "高度：", "Высота: "),
++    ("Maintain aspect ratio:", "保持宽高比：", "Сохранять пропорции:"),
++    ("Resample: ", "重采样：", "Интерполяция: "),
++    ("Nearest Neighbor", "最近邻", "Ближайший сосед"),
++    ("Linear Filter", "线性", "Линейная"),
++    ("Cubic Filter", "三次", "Кубическая"),
++    ("Gaussian Filter", "高斯", "Гауссова"),
++    ("Hue: ", "色相：", "Оттенок: "),
++    ("Contrast: ", "对比度：", "Контраст: "),
++    ("Brightness: ", "亮度：", "Яркость: "),
++    ("Saturation: ", "饱和度：", "Насыщенность: "),
++    ("Grayscale: ", "灰度：", "Оттенки серого: "),
++    ("Invert: ", "反相：", "Инверсия: "),
++    ("Colorspace: ", "色彩空间：", "Цветовое пространство: "),
++    // About
++    ("Version", "版本", "Версия"),
++    ("Commit", "提交", "Коммит"),
++    ("Window platform", "窗口系统", "Оконная система"),
++    ("GPU Backend", "图形接口", "Графический интерфейс"),
++    ("Driver", "驱动", "Драйвер"),
++    // File chooser filters
++    ("All", "全部", "Все"),
++    ("Animated", "动画", "Анимация"),
++];
+diff --git a/src/main.rs b/src/main.rs
+index b940eec..2fdbb70 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -21,6 +21,7 @@ use app::{
+     op_queue::Op,
+     preferences::{PREFERENCES, Preferences},
+ };
++mod i18n;
+ mod icon;
+ mod rect;
+ mod util;
+@@ -211,6 +212,9 @@ impl WindowHandler {
+                 });
+         }
+ 
++        // Shabnam: a face with Chinese characters; see i18n.rs.
++        i18n::add_cjk_font(egui_winit.egui_ctx());
++
+         egui_winit.egui_ctx().global_style_mut(|style| {
+             style.spacing.slider_width = 200.0;
+         });

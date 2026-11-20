@@ -22,14 +22,27 @@
 # AVIF ("avif": dav1d, C), JPEG XL ("jxl": libjxl, C++). The only C code compiled in is libwebp
 # (crate libwebp-sys2, feature "static"), built by cc with zig.
 #
-# The interface is English only (no translations exist upstream).
+# idle-redraw.patch: upstream draws a new frame every time its event loop wakes up, and on Wayland
+# showing a frame wakes it, so a still picture was redrawn at the screen's refresh rate for ever
+# (18.6 % of one core of the laptop). The patch draws when something asks for it: input, a
+# resize, an animation's next frame, egui's own repaint requests, a message from a worker thread.
+#
+# zh-ru-interface.patch: upstream is English only. The patch adds src/i18n.rs — a table of the
+# interface's 118 texts in Simplified Chinese and Russian, looked up by the English text
+# (`tr("Open")`), language from LC_ALL / LC_MESSAGES / LANG, English for anything else — and puts
+# `tr(..)` around those texts where they are shown. It also gives egui the Simplified Chinese face
+# of Noto Sans CJK (/usr/share/fonts/noto/NotoSansCJK-Regular.ttc, face 2) as the last font, in
+# every language, so that Chinese text and file names are drawn (egui's own fonts have Latin and
+# Cyrillic only). Left in English: format and pixel-type names (PNG, Rgba8, Lanczos ...), key
+# names in shortcuts, and the three error texts that carry a decoder's own message.
 set -e
 SIMP=b6e5f05c2f5f53f91fdf587f90dacf53e0141947          # main, 2026-10-05 (v3.11.0 + 7 commits)
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../cross-env.sh"
 checkout simp https://github.com/Kl4rry/simp.git $SIMP
 cd "$WORK/src/simp"
-git apply "$here/no-cargo-about.patch" "$here/adapter-limits.patch"
+git apply "$here/no-cargo-about.patch" "$here/adapter-limits.patch" "$here/idle-redraw.patch" \
+          "$here/zh-ru-interface.patch"
 export CARGO_TARGET_DIR="$WORK/target/simp"
 cargo fetch --locked --target $TRIPLE
 hal=$(patched_crate wgpu-hal 30.0.1 "$here/../wgpu-hal-30.0.1-mali-present.patch")

@@ -40,8 +40,25 @@
 #
 # Languages really present (locales/*.toml, 92 strings each): English, Simplified Chinese, Russian
 # (also German, Spanish, French, Japanese).
-# Formats (rodio "symphonia-all" = symphonia 0.5): MP3, FLAC, M4A/AAC/ALAC, Ogg Vorbis, WAV, AIFF.
-# Not Opus: symphonia has no Opus decoder; .opus files are listed but fail to play.
+# Formats (rodio "symphonia-all" = symphonia 0.5): MP3, FLAC, M4A/AAC/ALAC, Ogg Vorbis, WAV, AIFF,
+# and Opus through rodio-0.23.0-opus.patch.
+#
+# rodio-0.23.0-opus.patch (applied to the rodio crate, not to Gem Player): symphonia 0.5 reads Ogg
+# Opus files but has no Opus decoder, and rodio offers no way to add a codec, so .opus files were
+# listed and failed to play. The patch adds src/decoder/opus.rs — symphonia's Decoder interface
+# over the crate unsafe-libopus 0.2.0 — and makes rodio's symphonia backend use a codec list with
+# it. unsafe-libopus is the reference decoder (libopus 1.3.1) translated to Rust by c2rust: cargo
+# builds it like any crate (no C compiler, no system library, nothing prebuilt). Chosen over the
+# crate opus-decoder 0.1.1 (safe Rust, written anew), which was tried first: on a 16 kbit/s mono
+# speech file (hybrid mode) 30 of its 501 packets came out different from libopus (up to 8 % of
+# full scale); unsafe-libopus matched ffmpeg's libopus 1.6.1 within 16-bit rounding (81 dB or
+# better) on seven test encodings (CELT, SILK narrow/wide band, hybrid; mono, stereo; 2.5-60 ms).
+# Mono and stereo only. The crate is taken from crates.io by name, version and the sha256 that
+# Cargo.lock held for it before the patch.
+#
+# open-in-running-player.patch: `gem-player FILE...` while a player runs hands the files to that
+# player through $XDG_RUNTIME_DIR/gem-player.sock and ends; the running player plays them (file,
+# then the rest of its folder, as at start). Upstream has no single-instance mechanism.
 set -e
 GEM=ab58f321a4c8cd035bd86054c641510361580797          # tag v1.2.1
 here=$(cd "$(dirname "$0")" && pwd)
@@ -49,7 +66,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../cross-env.sh"
 checkout gem-player https://github.com/JamesMoreau/gem-player.git $GEM
 cd "$WORK/src/gem-player"
-git apply "$here/builds-on-linux.patch" "$here/shabnam.patch"
+git apply "$here/builds-on-linux.patch" "$here/shabnam.patch" "$here/open-in-running-player.patch"
 mv locales/ru.TOML locales/ru.toml
 cp "$here/Cargo.lock" Cargo.lock
 # The sysroot has libasound.so but not alsa-lib's development files; alsa-sys only needs to be
@@ -58,6 +75,14 @@ mkdir -p "$WORK/pc"
 printf 'Name: alsa\nDescription: ALSA library\nVersion: 1.2.14\nLibs: -L/usr/lib -lasound\nCflags:\n' > "$WORK/pc/alsa.pc"
 export PKG_CONFIG_LIBDIR="$PKG_CONFIG_LIBDIR:$WORK/pc"
 export CARGO_TARGET_DIR="$WORK/target/gem-player" RUSTUP_TOOLCHAIN=stable
+# rodio 0.23.0 with Opus: the published crate, checked against its sha256, plus our patch. Cargo
+# is pointed at the directory; Cargo.lock names rodio without a registry source for that reason.
+rodio=$WORK/src/rodio-0.23.0-shabnam
+rm -rf "$rodio" "$rodio.crate" && mkdir -p "$rodio"
+curl -sSfL -o "$rodio.crate" https://static.crates.io/crates/rodio/rodio-0.23.0.crate
+echo "36e3ee0a5ca418bac59a15d5506e498ab138359edbb67257a6b8a3b93d411f39  $rodio.crate" | shasum -a 256 -c - >/dev/null
+tar -xzf "$rodio.crate" -C "$rodio" --strip-components 1
+patch -s -p1 -d "$rodio" < "$here/rodio-0.23.0-opus.patch"
 RUSTFLAGS="-L native=$SYSROOT/usr/lib" \
-  cargo zigbuild --locked --release --target $TARGET
+  cargo zigbuild --locked --release --target $TARGET --config "patch.crates-io.rodio.path='$rodio'"
 cp "$CARGO_TARGET_DIR/$TRIPLE/release/gem-player" "$WORK/out/gem-player"

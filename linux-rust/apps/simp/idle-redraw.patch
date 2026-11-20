@@ -1,0 +1,107 @@
+diff --git a/src/app.rs b/src/app.rs
+index 907f322..654f305 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -312,6 +312,9 @@ impl App {
+             UserEvent::Exit => {
+                 let exit = self.exit.clone();
+                 let dialog_proxy = self.dialog_manager.get_proxy();
++                // Shabnam: the thread below wakes the event loop when the answer is "close"; the
++                // window is no longer drawn all the time, so nothing else would look at `exit`.
++                let wake_proxy = self.proxy.clone();
+                 if !self.op_queue.undo_stack().is_edited() {
+                     exit.store(true, Ordering::Relaxed);
+                     return;
+@@ -344,6 +347,7 @@ impl App {
+                         .unwrap_or(false);
+                     if close {
+                         exit.store(true, Ordering::Relaxed);
++                        let _ = wake_proxy.send_event(UserEvent::Wake);
+                     }
+                 });
+             }
+diff --git a/src/main.rs b/src/main.rs
+index a9b25c4..b940eec 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -7,6 +7,7 @@ use std::{
+     path::PathBuf,
+     sync::{Arc, Mutex},
+     thread,
++    time::Instant,
+ };
+ 
+ use cgmath::Vector2;
+@@ -25,7 +26,7 @@ mod rect;
+ mod util;
+ use util::UserEvent;
+ use winit::{
+-    event::{Event, WindowEvent},
++    event::{Event, StartCause, WindowEvent},
+     event_loop::{ControlFlow, EventLoop, EventLoopProxy},
+     keyboard::{Key, ModifiersState},
+     window::{Fullscreen, Window, WindowAttributes},
+@@ -268,13 +269,23 @@ impl WindowHandler {
+                 app.window_platform = get_window_platform(event_loop);
+                 wgpu.window.set_visible(true);
+             }
+-            Event::NewEvents(..) => wgpu.window.request_redraw(),
++            // Shabnam: upstream asked for a new frame every time the event loop woke up
++            // (`NewEvents(..)`). On Wayland showing a frame wakes the loop by itself (the
++            // compositor's "frame shown" and "buffer released" messages), so a still picture was
++            // drawn again at the screen's refresh rate for ever: 18-19 % of one core of the laptop
++            // with nothing changing. A frame is now drawn at start, when the time an animation or
++            // egui asked for has come, after input, after a resize and after a message from one
++            // of the program's own threads (see `Event::UserEvent` below).
++            Event::NewEvents(StartCause::Init | StartCause::ResumeTimeReached { .. }) => {
++                wgpu.window.request_redraw()
++            }
+             Event::WindowEvent { event, .. } => match event {
+                 WindowEvent::CloseRequested => {
+                     let _ = proxy.send_event(UserEvent::Exit);
+                 }
+                 WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                     wgpu.scale_factor = scale_factor;
++                    wgpu.window.request_redraw();
+                 }
+                 WindowEvent::Resized(size) => {
+                     if size.width > 0 && size.height > 0 {
+@@ -283,6 +294,7 @@ impl WindowHandler {
+                         wgpu.surface.configure(&wgpu.device, &wgpu.config);
+                         app.resize(size);
+                     }
++                    wgpu.window.request_redraw();
+                 }
+                 WindowEvent::RedrawRequested => {
+                     {
+@@ -480,7 +492,29 @@ impl WindowHandler {
+                 confy::store("simp", None, data).unwrap();
+                 std::process::exit(0);
+             }
+-            Event::UserEvent(mut event) => app.handle_user_event(&wgpu, &mut event),
++            Event::UserEvent(mut event) => {
++                // Shabnam: egui's "draw again in N ms" (a tooltip's delay, a blinking text
++                // cursor) only moves the wake-up time forward; everything else (a loaded picture,
++                // a finished operation, a new dialog, egui's "draw again now") draws a frame.
++                let later = match &event {
++                    UserEvent::RepaintRequest(info) if !info.delay.is_zero() => Some(info.delay),
++                    _ => None,
++                };
++                app.handle_user_event(&wgpu, &mut event);
++                match later.map(|delay| Instant::now().checked_add(delay)) {
++                    None => wgpu.window.request_redraw(),
++                    Some(None) => (),
++                    Some(Some(at)) => {
++                        let sooner = match event_loop.control_flow() {
++                            ControlFlow::WaitUntil(current) => at < current,
++                            _ => true,
++                        };
++                        if sooner {
++                            event_loop.set_control_flow(ControlFlow::WaitUntil(at));
++                        }
++                    }
++                }
++            }
+             _ => (),
+         });
+     }

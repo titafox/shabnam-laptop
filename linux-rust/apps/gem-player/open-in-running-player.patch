@@ -1,0 +1,158 @@
+diff --git a/src/main.rs b/src/main.rs
+index 51acb40..b14fd14 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -123,6 +123,11 @@ struct GemPlayer {
+ 
+ fn main() -> eframe::Result {
+     env_logger::init(); // Log to stderr (if run with `RUST_LOG=debug`).
++
++    // Shabnam: `gem-player FILE...` while a player is running gives the files to that player.
++    if running_player::hand_over() {
++        return Ok(());
++    }
+     info!("Starting up Gem Player.");
+ 
+     let icon_data = icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).expect("The icon data must be valid");
+@@ -305,6 +310,7 @@ pub fn init_gem_player(cc: &CreationContext<'_>) -> GemPlayer {
+     };
+ 
+     start_logic_wakeup_thread(&cc.egui_ctx);
++    running_player::listen(&cc.egui_ctx);
+ 
+     GemPlayer {
+         ui: UIState {
+@@ -419,6 +425,7 @@ impl App for GemPlayer {
+         poll_windows_menu_shortcuts(ctx, frame, self);
+ 
+         maybe_initialize_os_media_controls(self, frame);
++        poll_opened_files(ctx, self);
+         check_for_next_track(ctx, self);
+ 
+         poll_commands(ctx, self);
+@@ -798,11 +805,11 @@ fn on_track_change(ctx: &Context, gem: &mut GemPlayer) {
+ /// Shabnam: `gem-player FILE...`. One file: that file, then the other audio files of its folder in
+ /// name order (so "next" and "previous" work as in a folder view). Several files: those files.
+ fn tracks_from_command_line() -> Vec<Track> {
+-    let mut paths: Vec<PathBuf> = std::env::args_os()
+-        .skip(1)
+-        .map(PathBuf::from)
+-        .filter(|path| path.is_file() && is_audio_file(path))
+-        .collect();
++    tracks_from_paths(std::env::args_os().skip(1).map(PathBuf::from).collect())
++}
++
++fn tracks_from_paths(paths: Vec<PathBuf>) -> Vec<Track> {
++    let mut paths: Vec<PathBuf> = paths.into_iter().filter(|path| path.is_file() && is_audio_file(path)).collect();
+ 
+     if let [only] = paths.as_slice()
+         && let Some(folder) = only.parent()
+@@ -832,6 +839,108 @@ fn tracks_from_command_line() -> Vec<Track> {
+         .collect()
+ }
+ 
++/// Shabnam: files a later `gem-player FILE...` handed to this player (see `running_player`) are
++/// played at once, in place of the queue, exactly as if the player had been started with them.
++fn poll_opened_files(ctx: &Context, gem: &mut GemPlayer) {
++    for paths in running_player::take_opened() {
++        let tracks = tracks_from_paths(paths);
++        if tracks.is_empty() {
++            continue;
++        }
++        gem.player.queue = tracks;
++        // "Repeat" would play the current track again instead of the first of these.
++        let repeat = take(&mut gem.player.repeat);
++        maybe_play_next(ctx, gem);
++        gem.player.repeat = repeat;
++    }
++}
++
++/// Shabnam: one player at a time. The first player listens on a socket in the user's runtime
++/// directory ($XDG_RUNTIME_DIR/gem-player.sock, a directory only that user can enter); a later
++/// `gem-player FILE...` writes its file names there and ends, and the first one plays them.
++/// Upstream has nothing of the kind: a second start was a second player on top of the first.
++/// A start without files is not handed over (it opens a window as before).
++mod running_player {
++    use std::{
++        io::{Read, Write},
++        os::unix::{
++            ffi::{OsStrExt, OsStringExt},
++            net::{UnixListener, UnixStream},
++        },
++        path::PathBuf,
++        sync::Mutex,
++        thread,
++        time::Duration,
++    };
++
++    static OPENED: Mutex<Vec<Vec<PathBuf>>> = Mutex::new(Vec::new());
++
++    fn socket() -> Option<PathBuf> {
++        let dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
++        dir.is_absolute().then(|| dir.join("gem-player.sock"))
++    }
++
++    /// True when a running player took this start's files. File names go as absolute paths with
++    /// a zero byte after each.
++    pub fn hand_over() -> bool {
++        let paths: Vec<PathBuf> =
++            std::env::args_os().skip(1).filter_map(|arg| std::path::absolute(PathBuf::from(arg)).ok()).collect();
++        if paths.is_empty() {
++            return false;
++        }
++        let Some(mut stream) = socket().and_then(|socket| UnixStream::connect(socket).ok()) else {
++            return false;
++        };
++        let mut message = Vec::new();
++        for path in &paths {
++            message.extend_from_slice(path.as_os_str().as_bytes());
++            message.push(0);
++        }
++        stream.write_all(&message).is_ok()
++    }
++
++    /// Becomes the running player: later starts reach this one. A socket file left by a player
++    /// that is gone (nobody answers) is replaced.
++    pub fn listen(ctx: &egui::Context) {
++        let Some(socket) = socket() else {
++            return;
++        };
++        if UnixStream::connect(&socket).is_ok() {
++            return; // a player without files was started beside a running one; that one keeps the socket
++        }
++        let _ = std::fs::remove_file(&socket);
++        let Ok(listener) = UnixListener::bind(&socket) else {
++            return;
++        };
++        let ctx = ctx.clone();
++        thread::spawn(move || {
++            for stream in listener.incoming() {
++                let Ok(stream) = stream else {
++                    continue;
++                };
++                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
++                let mut message = Vec::new();
++                if stream.take(1 << 20).read_to_end(&mut message).is_err() {
++                    continue;
++                }
++                let paths: Vec<PathBuf> = message
++                    .split(|byte| *byte == 0)
++                    .filter(|name| !name.is_empty())
++                    .map(|name| PathBuf::from(std::ffi::OsString::from_vec(name.to_vec())))
++                    .collect();
++                if !paths.is_empty() {
++                    OPENED.lock().unwrap().push(paths);
++                    ctx.request_repaint();
++                }
++            }
++        });
++    }
++
++    pub fn take_opened() -> Vec<Vec<PathBuf>> {
++        std::mem::take(&mut *OPENED.lock().unwrap())
++    }
++}
++
+ pub const DARK_ACCENT: Color32 = Color32::from_rgb(0x46, 0x7E, 0xDC);
+ pub const LIGHT_ACCENT: Color32 = Color32::from_rgb(0x66, 0xA2, 0xE4);
+ 

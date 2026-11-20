@@ -1,11 +1,20 @@
-//! 隔空传送 in the shell: the switch in the quick panel, and the notice card above the shelf's
-//! right end that asks before a transfer is accepted and tells when files have arrived.
-//! The receiver itself is another program (see drop.rs); this file only shows what it reports
+//! 隔空传送 in the shell: the switch in the quick panel, the notice card above the shelf's
+//! right end that asks before a transfer is accepted and tells when files have arrived — and,
+//! for sending, the picker: a panel in the middle of the screen that lists the devices the
+//! daemon found and lets the owner choose where the files go.
+//! The daemon itself is another program (see drop.rs); this file only shows what it reports
 //! and sends back the owner's clicks. Its texts are in lang.rs with all the others.
+//!
+//! Sending and trust: the files come from a program of the desktop's unprivileged user (the
+//! file manager — or the browser, which must be assumed hostile). That program cannot say where
+//! they go. The target is chosen here, by a click in a surface only this (root) shell draws:
+//! every device is listed with name, address and certificate fingerprint; a device the owner
+//! has sent to before (remembered by fingerprint) is marked and sends at one click, any other
+//! asks for a second, explicit confirmation. No key confirms a send.
 
-use super::{inside, QuickHit, QuickLayout, Rect, Ui, ACCENT, CHIP, HOVER, ON_ACCENT, PANEL, TEXT, TEXT2, WARN};
+use super::{inside, wrap, Act, Key, Panel, QuickHit, QuickLayout, Rect, Ui, ACCENT, CHIP, HOVER, ON_ACCENT, PANEL, TEXT, TEXT2, WARN};
 use crate::draw::{argb, Canvas};
-use crate::drop::ipc::{FromDaemon, Refusal, ToDaemon};
+use crate::drop::ipc::{short_fingerprint, Device, DeviceKind, FromDaemon, Refusal, SendOutcome, ToDaemon};
 use crate::drop::{Event, Request};
 use crate::lang::{self, fill, Count, Msg};
 use crate::sys;
@@ -28,13 +37,18 @@ enum Notice {
     Refused { from: String, why: Refusal },
     Text { from: String, text: String },
     StartFailed,
+    /// Files are on their way out (`file` 0: waiting for the other side to accept).
+    Sending { id: String, to: String, file: u32, count: u32, done: u64, total: u64 },
+    SendResult { to: String, outcome: SendOutcome, sent: u32 },
 }
 
 impl Notice {
     /// How long it stays without a click; None: until something happens.
     fn lifetime(&self) -> Option<Duration> {
         match self {
-            Notice::Offer { .. } | Notice::Progress { .. } => None,
+            Notice::Offer { .. } | Notice::Progress { .. } | Notice::Sending { .. } => None,
+            Notice::SendResult { outcome: SendOutcome::Sent, .. } => Some(Duration::from_secs(15)),
+            Notice::SendResult { .. } => Some(Duration::from_secs(30)),
             Notice::Done { .. } => Some(Duration::from_secs(20)),
             Notice::Text { .. } => Some(Duration::from_secs(30)),
             Notice::Refused { .. } | Notice::StartFailed => Some(Duration::from_secs(10)),
@@ -48,6 +62,100 @@ pub(super) enum NoticeHit {
     Main,
     Other,
     Dismiss,
+}
+
+// ---------- sending: the picker's state ----------
+
+/// Where devices the owner has sent to are remembered (one certificate fingerprint per line,
+/// in the shell's own configuration directory, which only root can write).
+const KNOWN_FILE: &str = "drop-known";
+const KNOWN_MOST: usize = 64;
+
+fn is_fingerprint(text: &str) -> bool {
+    (16..=128).contains(&text.len()) && text.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// A device counts as known only by its certificate: one that does not encrypt has nothing
+/// that could not be copied, and is asked about every time.
+fn is_known(known: &[String], device: &Device) -> bool {
+    device.https && known.iter().any(|k| *k == device.fingerprint)
+}
+
+/// Notes that the owner sent to `device`; true when the list changed.
+fn remember(known: &mut Vec<String>, device: &Device) -> bool {
+    if !device.https || !is_fingerprint(&device.fingerprint) || known.first() == Some(&device.fingerprint) {
+        return false;
+    }
+    known.retain(|k| *k != device.fingerprint);
+    known.insert(0, device.fingerprint.clone());
+    known.truncate(KNOWN_MOST);
+    true
+}
+
+#[derive(Clone, PartialEq, Debug)]
+enum SendView {
+    /// The devices to choose from.
+    List,
+    /// One was clicked that the owner has not sent to before: all of it, and "send?".
+    Confirm(Device),
+    /// The chosen device wants a PIN.
+    Pin { wrong: bool },
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) enum SendHit {
+    Row(usize),
+    Refresh,
+    Cancel,
+    Back,
+    Go,
+}
+
+/// What the panel should do after something happened.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Wish {
+    Open,
+    Close,
+    Redraw,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+struct SendUi {
+    id: String,
+    count: u32,
+    bytes: u64,
+    name: String,
+    devices: Vec<Device>,
+    searching: bool,
+    view: SendView,
+    /// The device the owner chose.
+    target: Option<Device>,
+    /// The owner has decided: closing the picker no longer withdraws the request.
+    committed: bool,
+    pin: String,
+    hover: Option<SendHit>,
+    scroll: f32,
+    /// Shown by a test command: its buttons only close it.
+    demo: bool,
+    /// (Test command) show the "no Wi-Fi" text whatever the daemon says.
+    no_wifi: bool,
+}
+
+impl SendUi {
+    fn new(id: String, count: u32, bytes: u64, name: String) -> SendUi {
+        // "Searching" until the first list arrives.
+        SendUi { id, count, bytes, name, devices: Vec::new(), searching: true, view: SendView::List, target: None, committed: false, pin: String::new(), hover: None, scroll: 0.0, demo: false, no_wifi: false }
+    }
+
+    /// The buttons at the bottom: the left one (if any) and the right one.
+    fn buttons(&self) -> (Option<(SendHit, Msg)>, (SendHit, Msg)) {
+        match &self.view {
+            SendView::List if self.searching => (None, (SendHit::Cancel, Msg::Cancel)),
+            SendView::List => (Some((SendHit::Refresh, Msg::SendRefresh)), (SendHit::Cancel, Msg::Cancel)),
+            SendView::Confirm(_) => (Some((SendHit::Back, Msg::SendBack)), (SendHit::Go, Msg::SendGo)),
+            SendView::Pin { .. } => (Some((SendHit::Cancel, Msg::Cancel)), (SendHit::Go, Msg::SendGo)),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -67,6 +175,14 @@ pub(super) struct DropUi {
     sender: String,
     /// Shown by a test command: its buttons only close it.
     demo: bool,
+    /// The send request that is being decided or is on its way (the picker shows it).
+    send: Option<SendUi>,
+    /// Fingerprints of devices the owner has sent to, newest first.
+    known: Vec<String>,
+    /// Set by `apply`: what the picker panel should do now.
+    wish: Option<Wish>,
+    /// When the daemon was last started because somebody wanted to send.
+    last_wake: Option<Instant>,
 }
 
 /// The switch's logic, apart from drawing: what a click on the tile asks for.
@@ -95,8 +211,14 @@ impl DropUi {
     /// Applies a report from the receiver; true when the notice changed.
     fn apply(&mut self, message: FromDaemon) -> bool {
         match message {
-            FromDaemon::State { alias, address, quick } => {
-                (self.on, self.starting, self.alias, self.address, self.quick) = (true, false, alias, address, quick);
+            FromDaemon::State { alias, address, quick, receiving } => {
+                // A daemon that only runs to send does not make the switch show "on".
+                (self.on, self.starting, self.alias, self.address, self.quick) = (receiving, false, alias, address, quick);
+                if !receiving && matches!(self.notice, Some(Notice::Offer { .. } | Notice::Progress { .. })) {
+                    self.notice = None;
+                    return true;
+                }
+                self.wish = self.send.is_some().then_some(Wish::Redraw);
                 return false;
             }
             FromDaemon::Offer { id, from, count, bytes, name } => {
@@ -124,15 +246,139 @@ impl DropUi {
             FromDaemon::Refused { from, why } => self.show(Notice::Refused { from, why }),
             FromDaemon::Text { from, text } => self.show(Notice::Text { from, text }),
             FromDaemon::Devices(_) => return false,
+            FromDaemon::SendRequest { id, count, bytes, name } => {
+                match self.send.as_mut().filter(|s| s.id == id && !s.demo) {
+                    // More files for the picker that is up.
+                    Some(send) => {
+                        (send.count, send.bytes, send.name) = (count, bytes, name);
+                        self.wish = Some(Wish::Redraw);
+                    }
+                    None => {
+                        self.send = Some(SendUi::new(id, count, bytes, name));
+                        self.wish = Some(Wish::Open);
+                    }
+                }
+                return false;
+            }
+            FromDaemon::SendDevices { id, searching, list } => {
+                if let Some(send) = self.send.as_mut().filter(|s| s.id == id && !s.demo) {
+                    // A device that is no longer offered cannot be confirmed.
+                    if matches!(&send.view, SendView::Confirm(device) if !list.contains(device)) {
+                        send.view = SendView::List;
+                    }
+                    (send.devices, send.searching, send.hover) = (list, searching, None);
+                    self.wish = Some(Wish::Redraw);
+                }
+                return false;
+            }
+            FromDaemon::SendPinWanted { id, wrong } => {
+                let send = match self.send.take().filter(|s| s.id == id && !s.demo) {
+                    Some(send) => send,
+                    None => SendUi::new(id, 0, 0, String::new()),
+                };
+                self.send = Some(SendUi { view: SendView::Pin { wrong }, committed: false, pin: String::new(), hover: None, ..send });
+                self.wish = Some(Wish::Open);
+                // The "waiting" card goes while the PIN is asked for.
+                if matches!(self.notice, Some(Notice::Sending { .. })) {
+                    self.notice = None;
+                    return true;
+                }
+                return false;
+            }
+            FromDaemon::SendProgress { id, to, file, count, done, total } => {
+                // Not over an offer that is still waiting for its answer.
+                if matches!(self.notice, Some(Notice::Offer { .. })) {
+                    return false;
+                }
+                self.notice = Some(Notice::Sending { id, to, file, count, done: done.min(total), total });
+                (self.until, self.demo) = (None, false);
+            }
+            FromDaemon::SendDone { id, to, outcome, sent } => {
+                if let Some(send) = self.send.take_if(|s| s.id == id && !s.demo) {
+                    // Sent, so the owner chose this device and it took the files: remember it.
+                    if let (SendOutcome::Sent, Some(device)) = (outcome, &send.target) {
+                        // (Unit tests must not write the machine's real list.)
+                        if remember(&mut self.known, device) && !cfg!(test) {
+                            sys::write_list(KNOWN_FILE, &self.known);
+                        }
+                    }
+                    self.wish = Some(Wish::Close);
+                }
+                let was_showing = matches!(&self.notice, Some(Notice::Sending { id: shown, .. }) if *shown == id);
+                if outcome == SendOutcome::Cancelled {
+                    // The owner's own doing (or the requester's): nothing to announce.
+                    if was_showing {
+                        self.notice = None;
+                    }
+                    return was_showing;
+                }
+                self.show(Notice::SendResult { to, outcome, sent });
+            }
         }
         true
+    }
+
+    /// What a click in the picker does: the message for the daemon, and whether the picker closes.
+    /// This is the only place a target is ever named — from the list the daemon sent, by a click.
+    fn send_click(&mut self, hit: SendHit) -> (Option<ToDaemon>, bool) {
+        let known = &self.known;
+        let Some(send) = self.send.as_mut() else { return (None, true) };
+        if send.demo {
+            return (None, true);
+        }
+        let to = |send: &mut SendUi, device: Device| {
+            let message = ToDaemon::SendTo { id: send.id.clone(), fingerprint: device.fingerprint.clone(), host: device.host.clone(), port: device.port };
+            (send.target, send.committed) = (Some(device), true);
+            (Some(message), true)
+        };
+        match (send.view.clone(), hit) {
+            (SendView::List, SendHit::Row(row)) => match send.devices.get(row).cloned() {
+                Some(device) if is_known(known, &device) => to(send, device),
+                Some(device) => {
+                    (send.view, send.hover) = (SendView::Confirm(device), None);
+                    (None, false)
+                }
+                None => (None, false),
+            },
+            (SendView::List, SendHit::Refresh) if !send.searching => {
+                send.searching = true;
+                (Some(ToDaemon::SendRefresh { id: send.id.clone() }), false)
+            }
+            (SendView::Confirm(device), SendHit::Go) => to(send, device),
+            (SendView::Confirm(_), SendHit::Back) => {
+                (send.view, send.hover) = (SendView::List, None);
+                (None, false)
+            }
+            (SendView::Pin { .. }, SendHit::Go) if !send.pin.is_empty() => {
+                send.committed = true;
+                (Some(ToDaemon::SendPin { id: send.id.clone(), pin: std::mem::take(&mut send.pin) }), true)
+            }
+            // Closing without having decided withdraws the request (see `send_closed`).
+            (_, SendHit::Cancel) => (None, true),
+            _ => (None, false),
+        }
+    }
+
+    /// The picker went away (cancel, Escape, a click beside it, another panel): unless the owner
+    /// had decided, the request is withdrawn.
+    fn send_closed(&mut self) -> Option<ToDaemon> {
+        let send = self.send.as_ref()?;
+        if send.committed && !send.demo {
+            return None;
+        }
+        let send = self.send.take()?;
+        (!send.demo).then_some(ToDaemon::SendCancel { id: send.id })
     }
 
     /// The receiver is gone: nothing can be answered any more.
     fn went_off(&mut self, failed: bool) {
         (self.on, self.starting, self.quick, self.address) = (false, false, false, None);
-        if matches!(self.notice, Some(Notice::Offer { .. } | Notice::Progress { .. })) {
+        if matches!(self.notice, Some(Notice::Offer { .. } | Notice::Progress { .. } | Notice::Sending { .. })) {
             self.notice = None;
+        }
+        // Nothing can be sent through a daemon that is gone.
+        if self.send.take_if(|s| !s.demo).is_some() {
+            self.wish = Some(Wish::Close);
         }
         if failed {
             self.show(Notice::StartFailed);
@@ -150,6 +396,8 @@ impl DropUi {
             (Some(Notice::Offer { id, .. }), _) => (Some(ToDaemon::Answer { id: id.clone(), accept: false }), false, true),
             (Some(Notice::Progress { id, .. }), NoticeHit::Main) => (Some(ToDaemon::Cancel { id: id.clone() }), false, false),
             (Some(Notice::Progress { .. }), _) => (None, false, false),
+            (Some(Notice::Sending { id, .. }), NoticeHit::Main) => (Some(ToDaemon::SendCancel { id: id.clone() }), false, false),
+            (Some(Notice::Sending { .. }), _) => (None, false, false),
             (Some(Notice::Done { saved, .. }), NoticeHit::Main) if *saved > 0 => (None, true, true),
             _ => (None, false, true),
         }
@@ -169,14 +417,27 @@ impl Ui {
     pub fn set_drop(&mut self, requests: mpsc::Sender<Request>) {
         let _ = requests.send(Request::Probe);
         self.drop.requests = Some(requests);
+        self.drop.known = sys::read_list(KNOWN_FILE).unwrap_or_default().into_iter().filter(|k| is_fingerprint(k)).take(KNOWN_MOST).collect();
+    }
+
+    /// Somebody connected to the wake socket: the daemon is wanted for sending.
+    pub fn drop_wake(&mut self) {
+        // Anybody of the desktop user can knock; however often, the daemon is started at most
+        // once in a while.
+        let now = Instant::now();
+        if self.drop.last_wake.is_some_and(|last| now.duration_since(last) < Duration::from_secs(3)) {
+            return;
+        }
+        self.drop.last_wake = Some(now);
+        self.drop.send(Request::Wake);
     }
 
     pub fn notice_wanted(&self) -> bool {
         self.drop.notice.is_some()
     }
 
-    /// News from the worker thread.
-    pub fn drop_event(&mut self, event: Event) {
+    /// News from the worker thread. The answer says what main.rs has to do about the picker.
+    pub fn drop_event(&mut self, event: Event) -> Act {
         let changed = match event {
             Event::Message(message) => self.drop.apply(message),
             Event::Off { failed } => {
@@ -185,7 +446,16 @@ impl Ui {
             }
         };
         self.dirty_notice |= changed;
-        self.dirty_panel |= self.open == Some(super::Panel::Quick);
+        self.dirty_panel |= self.open == Some(Panel::Quick);
+        match (self.drop.wish.take(), self.open == Some(Panel::Send)) {
+            (Some(Wish::Open), false) => Act::Open(Panel::Send),
+            (Some(Wish::Close), true) => Act::Close,
+            (Some(Wish::Open | Wish::Redraw), true) => {
+                self.dirty_panel = true;
+                Act::None
+            }
+            _ => Act::None,
+        }
     }
 
     /// Once a second: a notice that has been up long enough goes away.
@@ -263,7 +533,7 @@ impl Ui {
         // (main button, other button, cross)
         match &self.drop.notice {
             Some(Notice::Offer { .. }) => (Some(Msg::DropAccept), Some(Msg::DropDecline), false),
-            Some(Notice::Progress { .. }) => (Some(Msg::Cancel), None, false),
+            Some(Notice::Progress { .. } | Notice::Sending { .. }) => (Some(Msg::Cancel), None, false),
             Some(Notice::Done { saved, .. }) if *saved > 0 => (Some(Msg::DropShowInFolder), None, true),
             Some(_) => (Some(Msg::DropClose), None, true),
             None => (None, None, false),
@@ -372,6 +642,30 @@ impl Ui {
             }
             Notice::Text { from, text } => (fill(self.t(Msg::DropMessageFrom), &[from]), text.clone(), None),
             Notice::StartFailed => (self.t(Msg::DropStartFailed).to_string(), self.t(Msg::DropStartFailedWhy).to_string(), None),
+            Notice::Sending { to, file: 0, .. } => (fill(self.t(Msg::SendWaiting), &[to]), self.t(Msg::SendWaitingSub).to_string(), None),
+            Notice::Sending { to, file, count, done, total, .. } => {
+                let part = if *total == 0 { 1.0 } else { *done as f32 / *total as f32 };
+                let sizes = format!("{} / {} · {}%", lang::human_size(lang, *done), lang::human_size(lang, *total), (part * 100.0) as u32);
+                let sub = if *count > 1 { format!("{} · {sizes}", Count::SendFileOf.text(lang, *file as u64, &[&count.to_string()])) } else { sizes };
+                (fill(self.t(Msg::SendSending), &[to]), sub, Some(part))
+            }
+            Notice::SendResult { to, outcome, sent } => {
+                let partly = |why: Msg| match sent {
+                    0 => self.t(why).to_string(),
+                    // (One line only: how far it got says more than why it stopped.)
+                    n => Count::SendSentPart.text(lang, *n as u64, &[]),
+                };
+                match outcome {
+                    SendOutcome::Sent => (Count::SendSent.text(lang, *sent as u64, &[]), fill(self.t(Msg::SendSentTo), &[to]), None),
+                    SendOutcome::Declined => (fill(self.t(Msg::SendDeclined), &[to]), self.t(Msg::SendNothingSent).to_string(), None),
+                    SendOutcome::Busy => (fill(self.t(Msg::SendBusy), &[to]), self.t(Msg::SendNothingSent).to_string(), None),
+                    SendOutcome::PinNeeded => (fill(self.t(Msg::SendFailed), &[to]), partly(Msg::SendWhyPin), None),
+                    SendOutcome::Unreachable | SendOutcome::NoSuchDevice => (fill(self.t(Msg::SendFailed), &[to]), partly(Msg::SendWhyUnreachable), None),
+                    SendOutcome::FileChanged => (fill(self.t(Msg::SendFailed), &[to]), partly(Msg::SendWhyFile), None),
+                    SendOutcome::NoAnswer => (fill(self.t(Msg::SendFailed), &[to]), partly(Msg::SendWhyNoAnswer), None),
+                    SendOutcome::Failed | SendOutcome::Cancelled => (fill(self.t(Msg::SendFailed), &[to]), partly(Msg::SendWhyInterrupted), None),
+                }
+            }
         };
         let line = self.fonts.fit(&line, 14.0, w - 36.0);
         c.text(&mut self.fonts, &line, 18.0, 52.0, 14.0, TEXT);
@@ -433,6 +727,393 @@ impl Ui {
     }
 }
 
+// ---------- sending: the picker panel ----------
+
+const SEND_W: f32 = 468.0;
+const SEND_HEAD: f32 = 92.0;
+const SEND_FOOT: f32 = 62.0;
+const SEND_ROW: f32 = 58.0;
+/// Rows shown without scrolling.
+const SEND_ROWS: usize = 4;
+
+struct SendLayout {
+    rect: Rect,
+    /// Between the heading and the buttons.
+    body: Rect,
+    /// The part of the body that holds device rows.
+    rows: Rect,
+    left: Rect,
+    right: Rect,
+    field: Rect,
+}
+
+/// The two arrows passing each other in a teal disc: the feature's mark.
+fn badge(c: &mut Canvas, cx: f32, cy: f32) {
+    c.circle(cx, cy, 10.0, ACCENT);
+    c.shape(cx - 8.0, cy - 8.0, 16.0, 16.0, ON_ACCENT, |gx, gy| {
+        let arrow = |ax: f32, up: bool| {
+            let t = if up { gy - 3.0 } else { 13.0 - gy };
+            let shaft = (gx - ax).abs() <= 0.8 && (0.5..=10.0).contains(&t);
+            let head = (0.0..=3.6).contains(&t) && (gx - ax).abs() <= t * 0.85 + 0.2;
+            shaft || head
+        };
+        arrow(5.6, true) || arrow(10.4, false)
+    });
+}
+
+/// A device's picture in a 20 x 20 box: a phone, a screen on a foot, or a plain ring.
+fn kind_shape(kind: DeviceKind, gx: f32, gy: f32) -> bool {
+    let frame = |x0: f32, y0: f32, x1: f32, y1: f32, t: f32| {
+        gx >= x0 && gx <= x1 && gy >= y0 && gy <= y1 && !(gx >= x0 + t && gx <= x1 - t && gy >= y0 + t && gy <= y1 - t)
+    };
+    match kind {
+        DeviceKind::Mobile => frame(5.5, 2.0, 14.5, 18.0, 1.5) || ((gx - 10.0).abs() <= 1.5 && (15.2..=16.2).contains(&gy)),
+        DeviceKind::Desktop => frame(2.0, 3.5, 18.0, 13.5, 1.5) || ((gx - 10.0).abs() <= 1.0 && (13.5..=16.0).contains(&gy)) || ((gx - 10.0).abs() <= 4.0 && (16.0..=17.4).contains(&gy)),
+        DeviceKind::Web | DeviceKind::Other => {
+            let d = ((gx - 10.0).powi(2) + (gy - 10.0).powi(2)).sqrt();
+            (6.3..=7.8).contains(&d) || d <= 2.0
+        }
+    }
+}
+
+fn kind_name(kind: DeviceKind) -> Msg {
+    match kind {
+        DeviceKind::Mobile => Msg::KindPhone,
+        DeviceKind::Desktop => Msg::KindComputer,
+        DeviceKind::Web => Msg::KindBrowser,
+        DeviceKind::Other => Msg::KindDevice,
+    }
+}
+
+impl Ui {
+    fn send_layout(&self) -> Option<SendLayout> {
+        let send = self.drop.send.as_ref()?;
+        let (pw, ph) = self.panel_size;
+        let w = SEND_W.min(pw - 24.0);
+        let shown = send.devices.len().min(SEND_ROWS) as f32 * SEND_ROW;
+        let body_h = match &send.view {
+            SendView::List if send.devices.is_empty() => 104.0,
+            SendView::List => shown + 30.0,
+            SendView::Confirm(_) => 128.0,
+            SendView::Pin { .. } => 84.0,
+        };
+        let h = SEND_HEAD + body_h + SEND_FOOT;
+        let (x, y) = (((pw - w) / 2.0).round(), ((ph - h) * 0.42).max(12.0).round());
+        let right = (x + w - 18.0 - 124.0, y + h - 18.0 - 34.0, 124.0, 34.0);
+        Some(SendLayout {
+            rect: (x, y, w, h),
+            body: (x + 18.0, y + SEND_HEAD, w - 36.0, body_h),
+            rows: (x + 8.0, y + SEND_HEAD, w - 16.0, shown),
+            left: (right.0 - 10.0 - 136.0, right.1, 136.0, 34.0),
+            right,
+            field: (x + 18.0, y + SEND_HEAD + 2.0, w - 36.0, 42.0),
+        })
+    }
+
+    fn send_hit(&self, x: f32, y: f32) -> Option<SendHit> {
+        let (layout, send) = (self.send_layout()?, self.drop.send.as_ref()?);
+        let (left, right) = send.buttons();
+        if inside(layout.right, x, y) {
+            Some(right.0)
+        } else if let Some((hit, _)) = left.filter(|_| inside(layout.left, x, y)) {
+            Some(hit)
+        } else if send.view == SendView::List && inside(layout.rows, x, y) {
+            let row = ((y - layout.rows.1 + send.scroll) / SEND_ROW) as usize;
+            (row < send.devices.len()).then_some(SendHit::Row(row))
+        } else {
+            None
+        }
+    }
+
+    /// Whether the point is on the picker's card (a press anywhere else closes it).
+    pub(super) fn send_inside(&self, x: f32, y: f32) -> bool {
+        self.send_layout().is_some_and(|layout| inside(layout.rect, x, y))
+    }
+
+    pub(super) fn send_move(&mut self, x: f32, y: f32) {
+        let hit = self.send_hit(x, y);
+        if let Some(send) = self.drop.send.as_mut().filter(|s| s.hover != hit) {
+            send.hover = hit;
+            self.dirty_panel = true;
+        }
+    }
+
+    pub(super) fn send_leave(&mut self) -> bool {
+        self.drop.send.as_mut().is_some_and(|s| s.hover.take().is_some())
+    }
+
+    pub(super) fn send_scroll(&mut self, steps: f32) {
+        let Some(send) = self.drop.send.as_mut() else { return };
+        let most = (send.devices.len().saturating_sub(SEND_ROWS)) as f32 * SEND_ROW;
+        let scroll = (send.scroll + steps * SEND_ROW).clamp(0.0, most);
+        if scroll != send.scroll {
+            (send.scroll, send.hover) = (scroll, None);
+            self.dirty_panel = true;
+        }
+    }
+
+    /// One of the picker's buttons or rows was clicked (or a test command says so).
+    fn send_do(&mut self, hit: SendHit) -> Act {
+        let (message, close) = self.drop.send_click(hit);
+        if let Some(message) = message {
+            self.drop.send(Request::Send(message));
+        }
+        self.dirty_panel = true;
+        if close {
+            Act::Close
+        } else {
+            Act::None
+        }
+    }
+
+    pub(super) fn send_press(&mut self, x: f32, y: f32) -> Act {
+        match self.send_hit(x, y) {
+            Some(hit) => self.send_do(hit),
+            None => Act::None,
+        }
+    }
+
+    /// The keyboard in the picker: Escape closes it; a PIN can be typed and entered. No key
+    /// chooses a device or confirms one — that takes a click on what is shown.
+    pub(super) fn send_key(&mut self, key: Key) -> Act {
+        let Some(send) = self.drop.send.as_mut() else { return Act::Close };
+        match (&send.view, key) {
+            (_, Key::Escape) => return Act::Close,
+            (SendView::Pin { .. }, Key::Enter) => return self.send_do(SendHit::Go),
+            (SendView::Pin { .. }, Key::Backspace) => {
+                send.pin.pop();
+            }
+            (SendView::Pin { .. }, Key::ClearLine) => send.pin.clear(),
+            (SendView::Pin { .. }, Key::Text(text)) => {
+                if send.pin.chars().count() + text.chars().count() <= 32 {
+                    send.pin.push_str(&text);
+                }
+            }
+            _ => return Act::None,
+        }
+        self.dirty_panel = true;
+        Act::None
+    }
+
+    /// The picker's panel was closed, by whatever means.
+    pub(super) fn send_panel_closed(&mut self) {
+        if let Some(message) = self.drop.send_closed() {
+            self.drop.send(Request::Send(message));
+        }
+    }
+
+    fn send_button(&mut self, c: &mut Canvas, rect: Rect, label: Msg, strong: bool, hover: bool) {
+        let (x, y, w, h) = rect;
+        c.rrect(x, y, w, h, 17.0, if strong { ACCENT } else { CHIP });
+        if hover {
+            c.rrect(x, y, w, h, 17.0, if strong { argb(0x33FFFFFF) } else { HOVER });
+        }
+        let label = self.t(label);
+        self.label_centered(c, label, x + w / 2.0, y + h / 2.0, 13.0, w - 14.0, if strong { ON_ACCENT } else { TEXT });
+    }
+
+    pub(super) fn draw_send(&mut self, c: &mut Canvas) {
+        let (Some(layout), Some(send)) = (self.send_layout(), self.drop.send.clone()) else { return };
+        let lang = lang::current();
+        let (pw, ph) = self.panel_size;
+        // The rest of the screen steps back: this is a question that wants an answer.
+        c.rrect(0.0, 0.0, pw, ph, 0.0, argb(0x73000000));
+        let (x, y, w, h) = layout.rect;
+        c.rrect(x - 1.0, y - 1.0, w + 2.0, h + 2.0, 23.0, argb(0x30FFFFFF));
+        c.rrect(x, y, w, h, 22.0, argb(0xFF202124));
+
+        badge(c, x + 28.0, y + 26.0);
+        let title = self.t(Msg::DropTitle);
+        c.text(&mut self.fonts, title, x + 46.0, y + 26.0, 12.0, TEXT2);
+        let alias = match (&send.view, &send.target) {
+            (SendView::Confirm(device), _) => device.alias.clone(),
+            (_, Some(device)) => device.alias.clone(),
+            _ => "…".to_string(),
+        };
+        let files = Count::SendFiles.text(lang, send.count as u64, &[]);
+        let first = if send.count == 1 { send.name.clone() } else { fill(self.t(Msg::DropAndMore), &[&send.name]) };
+        let (line, sub) = match &send.view {
+            SendView::List => (files, format!("{first} · {}", lang::human_size(lang, send.bytes))),
+            SendView::Confirm(_) => (fill(self.t(Msg::SendToTitle), &[&alias]), format!("{files} · {first} · {}", lang::human_size(lang, send.bytes))),
+            SendView::Pin { .. } if send.count == 0 => (fill(self.t(Msg::SendPinTitle), &[&alias]), String::new()),
+            SendView::Pin { .. } => (fill(self.t(Msg::SendPinTitle), &[&alias]), format!("{files} · {first} · {}", lang::human_size(lang, send.bytes))),
+        };
+        let line = self.fonts.fit(&line, 16.0, w - 36.0);
+        c.text(&mut self.fonts, &line, x + 18.0, y + 54.0, 16.0, TEXT);
+        let sub = self.fonts.fit(&sub, 12.0, w - 36.0);
+        c.text(&mut self.fonts, &sub, x + 18.0, y + 76.0, 12.0, TEXT2);
+
+        let body = layout.body;
+        match &send.view {
+            SendView::List if send.devices.is_empty() => {
+                let no_wifi = send.no_wifi || (!send.demo && !send.searching && self.drop.address.is_none());
+                let text = self.t(if send.searching { Msg::SendSearching } else if no_wifi { Msg::SendNoWifi } else { Msg::SendEmpty });
+                let lines = wrap(&mut self.fonts, text, 13.0, body.2 - 24.0, 3);
+                let top = body.1 + (body.3 - lines.len() as f32 * 20.0) / 2.0 + 10.0;
+                for (i, text) in lines.iter().enumerate() {
+                    c.text_centered(&mut self.fonts, text, x + w / 2.0, top + i as f32 * 20.0, 13.0, body.2, if send.searching { TEXT2 } else { TEXT });
+                }
+            }
+            SendView::List => {
+                let rows = layout.rows;
+                c.set_clip(Some(rows));
+                for (i, device) in send.devices.iter().enumerate() {
+                    let ry = rows.1 + i as f32 * SEND_ROW - send.scroll;
+                    if ry + SEND_ROW <= rows.1 || ry >= rows.1 + rows.3 {
+                        continue;
+                    }
+                    if send.hover == Some(SendHit::Row(i)) {
+                        c.rrect(rows.0, ry + 2.0, rows.2, SEND_ROW - 4.0, 14.0, HOVER);
+                    }
+                    c.circle(rows.0 + 30.0, ry + SEND_ROW / 2.0, 18.0, CHIP);
+                    let kind = device.kind;
+                    c.shape(rows.0 + 20.0, ry + SEND_ROW / 2.0 - 10.0, 20.0, 20.0, TEXT, |gx, gy| kind_shape(kind, gx, gy));
+                    let known = is_known(&self.drop.known, device);
+                    let mut room = rows.2 - 60.0 - 14.0;
+                    if known {
+                        let label = self.t(Msg::SendKnown);
+                        let lw = self.fonts.width(label, 11.0) + 16.0;
+                        let (lx, ly) = (rows.0 + rows.2 - 12.0 - lw, ry + 11.0);
+                        c.rrect(lx, ly, lw, 20.0, 10.0, HOVER);
+                        c.text(&mut self.fonts, label, lx + 8.0, ly + 10.0, 11.0, ACCENT);
+                        room -= lw + 8.0;
+                    }
+                    let name = self.fonts.fit(&device.alias, 14.0, room);
+                    c.text(&mut self.fonts, &name, rows.0 + 60.0, ry + 20.0, 14.0, TEXT);
+                    // Everything that identifies it, before anything is sent: kind, address, certificate.
+                    let place = format!("{} · {}", self.t(kind_name(device.kind)), device.host);
+                    let detail = if device.https { format!("{place} · {}", short_fingerprint(&device.fingerprint)) } else { format!("{place} · {}", self.t(Msg::SendPlain)) };
+                    let detail = self.fonts.fit(&detail, 11.5, rows.2 - 60.0 - 14.0);
+                    c.text(&mut self.fonts, &detail, rows.0 + 60.0, ry + 40.0, 11.5, if device.https { TEXT2 } else { WARN });
+                }
+                c.set_clip(None);
+                let more = send.devices.len() > SEND_ROWS;
+                let status = self.t(if send.searching { Msg::SendSearching } else { Msg::SendChoose });
+                let status = if more { format!("{status} · {}", send.devices.len()) } else { status.to_string() };
+                c.text(&mut self.fonts, &status, x + 18.0, rows.1 + rows.3 + 16.0, 12.0, TEXT2);
+            }
+            SendView::Confirm(device) => {
+                let place = format!("{} · {}:{}", self.t(kind_name(device.kind)), device.host, device.port);
+                c.text(&mut self.fonts, &place, body.0, body.1 + 12.0, 13.5, TEXT);
+                if device.https {
+                    let proof = fill(self.t(Msg::SendFingerprint), &[&short_fingerprint(&device.fingerprint)]);
+                    c.text(&mut self.fonts, &proof, body.0, body.1 + 36.0, 13.5, TEXT);
+                } else {
+                    let proof = self.t(Msg::SendUnencrypted);
+                    c.text(&mut self.fonts, proof, body.0, body.1 + 36.0, 13.5, WARN);
+                }
+                let note = self.t(Msg::SendFirstTime);
+                for (i, text) in wrap(&mut self.fonts, note, 12.0, body.2, 3).iter().enumerate() {
+                    c.text(&mut self.fonts, text, body.0, body.1 + 66.0 + i as f32 * 18.0, 12.0, TEXT2);
+                }
+            }
+            SendView::Pin { wrong } => {
+                let (fx, fy, fw, fh) = layout.field;
+                c.rrect(fx, fy, fw, fh, 20.0, CHIP);
+                let mid = fy + fh / 2.0;
+                let caret = if send.pin.is_empty() {
+                    let hint = self.t(Msg::SendPinField);
+                    c.text(&mut self.fonts, hint, fx + 21.0, mid, 14.0, TEXT2);
+                    fx + 16.0
+                } else {
+                    let shown = self.fonts.fit(&send.pin, 15.0, fw - 36.0);
+                    fx + 16.0 + c.text(&mut self.fonts, &shown, fx + 16.0, mid, 15.0, TEXT) + 1.0
+                };
+                c.rrect(caret, mid - 9.0, 1.4, 18.0, 0.0, ACCENT);
+                let (hint, ink) = if *wrong { (self.t(Msg::SendPinWrong), WARN) } else { (self.t(Msg::SendPinHint), TEXT2) };
+                let hint = self.fonts.fit(hint, 11.5, fw - 8.0);
+                c.text(&mut self.fonts, &hint, fx + 4.0, fy + fh + 18.0, 11.5, ink);
+            }
+        }
+
+        let (left, right) = send.buttons();
+        if let Some((hit, label)) = left {
+            self.send_button(c, layout.left, label, false, send.hover == Some(hit));
+        }
+        self.send_button(c, layout.right, right.1, right.0 == SendHit::Go, send.hover == Some(right.0));
+    }
+
+    /// Test commands (`shabnam-shell test-send …`), for looking at and driving the picker without
+    /// mouse or keyboard.
+    ///   demo list|searching|empty|nowifi|confirm|plain|pin|waiting|progress|sent|declined|failed
+    ///        made-up content; the buttons only close it
+    ///   row N | send | back | refresh | cancel | type TEXT | stop
+    ///        what a click on the N-th device, on 发送, 返回, 重新查找, 取消 would do in the picker
+    ///        that is really up; typing a PIN; the cancel button of the "sending" card
+    pub fn test_send(&mut self, command: &str) -> Act {
+        let (verb, rest) = command.split_once(' ').map_or((command, ""), |(verb, rest)| (verb, rest.trim()));
+        let live = self.open == Some(Panel::Send) && self.drop.send.as_ref().is_some_and(|s| !s.demo);
+        match verb {
+            "demo" => self.test_send_demo(rest),
+            "row" if live => rest.parse::<usize>().ok().filter(|n| *n >= 1).map_or(Act::None, |n| self.send_do(SendHit::Row(n - 1))),
+            "send" if live => self.send_do(SendHit::Go),
+            "back" if live => self.send_do(SendHit::Back),
+            "refresh" if live => self.send_do(SendHit::Refresh),
+            "cancel" if live => Act::Close,
+            "type" if live => {
+                self.send_key(Key::ClearLine);
+                self.send_key(Key::Text(rest.chars().filter(|c| !c.is_control()).take(32).collect()))
+            }
+            "stop" => {
+                if let (Some(ToDaemon::SendCancel { id }), ..) = self.drop.click(NoticeHit::Main) {
+                    self.drop.send(Request::Send(ToDaemon::SendCancel { id }));
+                }
+                Act::None
+            }
+            _ => Act::None,
+        }
+    }
+
+    fn test_send_demo(&mut self, which: &str) -> Act {
+        let device = |alias: &str, host: &str, fingerprint: &str, kind: DeviceKind, https: bool| Device { alias: alias.into(), fingerprint: fingerprint.into(), host: host.into(), port: 53317, https, kind };
+        let phone = device("小米 14", "192.0.2.52", "7C1A09E4B2D35F6680A1C3E5", DeviceKind::Mobile, true);
+        let list = vec![
+            phone.clone(),
+            device("MacBook Air", "192.0.2.163", "0F3B77D2A9C4E1586B20D4F1", DeviceKind::Desktop, true),
+            device("Old tablet", "192.0.2.77", "plain", DeviceKind::Other, false),
+        ];
+        let notice = match which {
+            "waiting" => Some(Notice::Sending { id: "demo".into(), to: phone.alias.clone(), file: 0, count: 3, done: 0, total: 12_400_000 }),
+            "progress" => Some(Notice::Sending { id: "demo".into(), to: phone.alias.clone(), file: 2, count: 3, done: 5_600_000, total: 12_400_000 }),
+            "sent" => Some(Notice::SendResult { to: phone.alias.clone(), outcome: SendOutcome::Sent, sent: 3 }),
+            "declined" => Some(Notice::SendResult { to: phone.alias.clone(), outcome: SendOutcome::Declined, sent: 0 }),
+            "failed" => Some(Notice::SendResult { to: phone.alias.clone(), outcome: SendOutcome::Unreachable, sent: 1 }),
+            _ => None,
+        };
+        if let Some(notice) = notice {
+            self.drop.show(notice);
+            self.drop.demo = true;
+            self.drop.until = Some(Instant::now() + Duration::from_secs(8));
+            self.dirty_notice = true;
+            return Act::None;
+        }
+        // Never over a picker that is really asking.
+        if self.drop.send.as_ref().is_some_and(|s| !s.demo) {
+            return Act::None;
+        }
+        let mut send = SendUi::new("demo".into(), 3, 12_400_000, "IMG_20261120_0731.jpg".into());
+        (send.demo, send.searching) = (true, false);
+        match which {
+            "list" => send.devices = list,
+            "searching" => send.searching = true,
+            "empty" => {}
+            "nowifi" => send.no_wifi = true,
+            "confirm" => (send.devices, send.view) = (list, SendView::Confirm(phone)),
+            "plain" => (send.view, send.devices) = (SendView::Confirm(list[2].clone()), list),
+            "pin" => (send.target, send.view, send.pin) = (Some(phone), SendView::Pin { wrong: false }, "4821".into()),
+            _ => return Act::None,
+        }
+        // In the demo one device is marked as known, to show the mark.
+        self.drop.send = Some(send);
+        self.dirty_panel = true;
+        if self.open == Some(Panel::Send) {
+            Act::None
+        } else {
+            Act::Open(Panel::Send)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -448,7 +1129,7 @@ mod tests {
         assert!(tile_request(false, true).is_none());
         let mut drop = DropUi::default();
         assert!(!drop.on);
-        assert!(!drop.apply(FromDaemon::State { alias: "水滴".into(), address: Some("192.0.2.33".into()), quick: true }));
+        assert!(!drop.apply(FromDaemon::State { alias: "水滴".into(), address: Some("192.0.2.33".into()), quick: true, receiving: true }));
         assert!(drop.on && drop.quick);
         // The receiver went away: off, and quick receive does not survive it.
         drop.went_off(false);
@@ -493,5 +1174,212 @@ mod tests {
         drop.apply(offer("s3"));
         drop.demo = true;
         assert_eq!(drop.click(NoticeHit::Main), (None, false, true));
+    }
+
+    fn device(alias: &str, https: bool) -> Device {
+        Device { alias: alias.into(), fingerprint: format!("{:A<24}", alias.to_uppercase()), host: "192.0.2.5".into(), port: 53317, https, kind: DeviceKind::Mobile }
+    }
+
+    fn picker(devices: Vec<Device>) -> DropUi {
+        let mut drop = DropUi::default();
+        assert!(!drop.apply(FromDaemon::SendRequest { id: "o-1".into(), count: 2, bytes: 30, name: "a.jpg".into() }));
+        assert_eq!(drop.wish.take(), Some(Wish::Open));
+        assert!(drop.send.as_ref().unwrap().searching, "searching until the first list arrives");
+        drop.apply(FromDaemon::SendDevices { id: "o-1".into(), searching: false, list: devices });
+        assert_eq!(drop.wish.take(), Some(Wish::Redraw));
+        drop
+    }
+
+    fn send_to(device: &Device) -> ToDaemon {
+        ToDaemon::SendTo { id: "o-1".into(), fingerprint: device.fingerprint.clone(), host: device.host.clone(), port: device.port }
+    }
+
+    #[test]
+    fn an_unknown_device_takes_two_clicks() {
+        let phone = device("phone", true);
+        let mut drop = picker(vec![phone.clone()]);
+        // The first click only shows it in full; nothing is sent to the daemon.
+        assert_eq!(drop.send_click(SendHit::Row(0)), (None, false));
+        assert_eq!(drop.send.as_ref().unwrap().view, SendView::Confirm(phone.clone()));
+        // Back, and nothing has happened.
+        assert_eq!(drop.send_click(SendHit::Back), (None, false));
+        assert_eq!(drop.send.as_ref().unwrap().view, SendView::List);
+        assert_eq!(drop.send_click(SendHit::Go), (None, false), "there is no send button in the list");
+        drop.send_click(SendHit::Row(0));
+        assert_eq!(drop.send_click(SendHit::Go), (Some(send_to(&phone)), true));
+        // The picker closes; the request is not withdrawn by that.
+        assert_eq!(drop.send_closed(), None);
+        assert!(drop.send.is_some());
+        // A row that is not there does nothing.
+        let mut drop = picker(vec![phone]);
+        assert_eq!(drop.send_click(SendHit::Row(5)), (None, false));
+    }
+
+    #[test]
+    fn closing_the_picker_undecided_withdraws_the_request() {
+        let mut drop = picker(vec![device("phone", true)]);
+        assert_eq!(drop.send_click(SendHit::Cancel), (None, true));
+        assert_eq!(drop.send_closed(), Some(ToDaemon::SendCancel { id: "o-1".into() }));
+        assert!(drop.send.is_none());
+        assert_eq!(drop.send_closed(), None);
+        // The same from the confirmation step (Escape, a click beside the card).
+        let mut drop = picker(vec![device("phone", true)]);
+        drop.send_click(SendHit::Row(0));
+        assert_eq!(drop.send_closed(), Some(ToDaemon::SendCancel { id: "o-1".into() }));
+    }
+
+    #[test]
+    fn devices_sent_to_are_remembered_by_certificate() {
+        let (phone, plain) = (device("phone", true), device("plain", false));
+        let mut known = Vec::new();
+        assert!(!is_known(&known, &phone));
+        assert!(remember(&mut known, &phone));
+        assert!(!remember(&mut known, &phone), "already first: nothing to write");
+        assert!(is_known(&known, &phone));
+        // Same name, another certificate: a stranger.
+        assert!(!is_known(&known, &Device { fingerprint: "B".repeat(24), ..phone.clone() }));
+        // A device that does not encrypt is never remembered and never known, whatever it claims.
+        assert!(!remember(&mut known, &plain));
+        assert!(!is_known(&[plain.fingerprint.clone()], &plain));
+        assert!(!remember(&mut known, &Device { fingerprint: "short".into(), ..phone.clone() }));
+        for i in 0..100 {
+            remember(&mut known, &Device { fingerprint: format!("{i:024}"), ..phone.clone() });
+        }
+        assert_eq!(known.len(), KNOWN_MOST);
+        assert!(!is_known(&known, &phone), "the oldest fall out");
+        assert!(is_fingerprint(&"A".repeat(64)) && !is_fingerprint("../../etc/passwd") && !is_fingerprint(""));
+    }
+
+    #[test]
+    fn a_known_device_sends_at_one_click_and_a_sent_one_becomes_known() {
+        let (phone, plain) = (device("phone", true), device("plain", false));
+        let mut drop = picker(vec![phone.clone(), plain.clone()]);
+        drop.send_click(SendHit::Row(0));
+        assert_eq!(drop.send_click(SendHit::Go), (Some(send_to(&phone)), true));
+        // Declined: not remembered.
+        assert!(drop.apply(FromDaemon::SendDone { id: "o-1".into(), to: "phone".into(), outcome: SendOutcome::Declined, sent: 0 }));
+        assert!(drop.known.is_empty() && drop.send.is_none());
+        assert_eq!(drop.notice, Some(Notice::SendResult { to: "phone".into(), outcome: SendOutcome::Declined, sent: 0 }));
+        // (Marking a device known writes the list; here it is put there directly.)
+        drop.known = vec![phone.fingerprint.clone(), plain.fingerprint.clone()];
+        drop.apply(FromDaemon::SendRequest { id: "o-1".into(), count: 1, bytes: 3, name: "b".into() });
+        drop.apply(FromDaemon::SendDevices { id: "o-1".into(), searching: false, list: vec![phone.clone(), plain.clone()] });
+        assert_eq!(drop.send_click(SendHit::Row(1)), (None, false), "unencrypted: asked every time");
+        assert_eq!(drop.send.as_ref().unwrap().view, SendView::Confirm(plain));
+        drop.send_click(SendHit::Back);
+        assert_eq!(drop.send_click(SendHit::Row(0)), (Some(send_to(&phone)), true));
+    }
+
+    #[test]
+    fn the_list_follows_the_daemon() {
+        let phone = device("phone", true);
+        let mut drop = picker(vec![phone.clone()]);
+        // Lists for another request are not this picker's.
+        drop.apply(FromDaemon::SendDevices { id: "o-9".into(), searching: true, list: vec![] });
+        assert_eq!(drop.send.as_ref().unwrap().devices.len(), 1);
+        // The device being confirmed disappears: back to the list, it cannot be confirmed.
+        drop.send_click(SendHit::Row(0));
+        drop.apply(FromDaemon::SendDevices { id: "o-1".into(), searching: false, list: vec![] });
+        assert_eq!(drop.send.as_ref().unwrap().view, SendView::List);
+        assert_eq!(drop.send_click(SendHit::Go), (None, false));
+        // More files for the same picker: the heading changes, the picker is not opened again.
+        drop.wish = None;
+        drop.apply(FromDaemon::SendRequest { id: "o-1".into(), count: 5, bytes: 99, name: "a.jpg".into() });
+        assert_eq!((drop.wish.take(), drop.send.as_ref().unwrap().count), (Some(Wish::Redraw), 5));
+        // Searching again is asked for once.
+        assert_eq!(drop.send_click(SendHit::Refresh), (Some(ToDaemon::SendRefresh { id: "o-1".into() }), false));
+        assert_eq!(drop.send_click(SendHit::Refresh), (None, false));
+        // The requester went away (the daemon says "cancelled"): the picker closes without a notice.
+        assert!(!drop.apply(FromDaemon::SendDone { id: "o-1".into(), to: String::new(), outcome: SendOutcome::Cancelled, sent: 0 }));
+        assert_eq!((drop.wish.take(), drop.send.is_none(), drop.notice.is_none()), (Some(Wish::Close), true, true));
+    }
+
+    #[test]
+    fn waiting_progress_and_result() {
+        let phone = device("phone", true);
+        let mut drop = picker(vec![phone.clone()]);
+        drop.send_click(SendHit::Row(0));
+        drop.send_click(SendHit::Go);
+        assert!(drop.apply(FromDaemon::SendProgress { id: "o-1".into(), to: "phone".into(), file: 0, count: 2, done: 0, total: 30 }));
+        assert!(drop.until.is_none());
+        assert!(drop.apply(FromDaemon::SendProgress { id: "o-1".into(), to: "phone".into(), file: 1, count: 2, done: 50, total: 30 }));
+        assert_eq!(drop.notice, Some(Notice::Sending { id: "o-1".into(), to: "phone".into(), file: 1, count: 2, done: 30, total: 30 }));
+        // Its button cancels the send; the cross does nothing while it runs.
+        assert_eq!(drop.click(NoticeHit::Main), (Some(ToDaemon::SendCancel { id: "o-1".into() }), false, false));
+        assert_eq!(drop.click(NoticeHit::Dismiss), (None, false, false));
+        // An offer that waits for its answer is not covered by progress.
+        drop.apply(offer("s1"));
+        assert!(!drop.apply(FromDaemon::SendProgress { id: "o-1".into(), to: "phone".into(), file: 2, count: 2, done: 20, total: 30 }));
+        assert!(matches!(drop.notice, Some(Notice::Offer { .. })));
+        drop.apply(FromDaemon::OfferGone { id: "s1".into() });
+        // Sent: the result is shown and the device is known from now on.
+        assert!(drop.apply(FromDaemon::SendDone { id: "o-1".into(), to: "phone".into(), outcome: SendOutcome::Sent, sent: 2 }));
+        assert_eq!(drop.notice, Some(Notice::SendResult { to: "phone".into(), outcome: SendOutcome::Sent, sent: 2 }));
+        assert!(drop.until.is_some() && is_known(&drop.known, &phone));
+        assert_eq!(drop.click(NoticeHit::Main), (None, false, true));
+        // Cancelled while it ran: the card goes, nothing is announced, nothing is remembered.
+        let tablet = device("tablet", true);
+        let mut drop = picker(vec![tablet.clone()]);
+        drop.send_click(SendHit::Row(0));
+        drop.send_click(SendHit::Go);
+        drop.apply(FromDaemon::SendProgress { id: "o-1".into(), to: "tablet".into(), file: 1, count: 2, done: 5, total: 30 });
+        assert!(drop.apply(FromDaemon::SendDone { id: "o-1".into(), to: "tablet".into(), outcome: SendOutcome::Cancelled, sent: 0 }));
+        assert!(drop.notice.is_none() && drop.known.is_empty());
+        // The daemon dying takes picker and card with it.
+        let mut drop = picker(vec![tablet]);
+        drop.apply(FromDaemon::SendProgress { id: "o-1".into(), to: "tablet".into(), file: 1, count: 2, done: 5, total: 30 });
+        drop.went_off(false);
+        assert_eq!((drop.wish.take(), drop.send.is_none(), drop.notice.is_none()), (Some(Wish::Close), true, true));
+    }
+
+    #[test]
+    fn a_pin_is_typed_in_the_picker() {
+        let phone = device("phone", true);
+        let mut drop = picker(vec![phone.clone()]);
+        drop.send_click(SendHit::Row(0));
+        drop.send_click(SendHit::Go);
+        drop.apply(FromDaemon::SendProgress { id: "o-1".into(), to: "phone".into(), file: 0, count: 2, done: 0, total: 30 });
+        drop.wish = None;
+        // The device wants a PIN: the picker comes back, and closing it now withdraws the request.
+        assert!(drop.apply(FromDaemon::SendPinWanted { id: "o-1".into(), wrong: false }));
+        assert_eq!(drop.wish.take(), Some(Wish::Open));
+        assert!(drop.notice.is_none());
+        let send = drop.send.as_ref().unwrap();
+        assert_eq!((&send.view, send.committed, send.target.as_ref()), (&SendView::Pin { wrong: false }, false, Some(&phone)));
+        assert_eq!(drop.send_click(SendHit::Go), (None, false), "an empty PIN is not sent");
+        drop.send.as_mut().unwrap().pin = "4821".into();
+        assert_eq!(drop.send_click(SendHit::Go), (Some(ToDaemon::SendPin { id: "o-1".into(), pin: "4821".into() }), true));
+        assert_eq!(drop.send_closed(), None);
+        drop.apply(FromDaemon::SendPinWanted { id: "o-1".into(), wrong: true });
+        assert_eq!(drop.send.as_ref().unwrap().view, SendView::Pin { wrong: true });
+        assert!(drop.send.as_ref().unwrap().pin.is_empty());
+        assert_eq!(drop.send_closed(), Some(ToDaemon::SendCancel { id: "o-1".into() }));
+    }
+
+    #[test]
+    fn a_demo_picker_sends_nothing() {
+        let mut drop = DropUi::default();
+        let mut send = SendUi::new("demo".into(), 1, 1, "x".into());
+        (send.demo, send.devices) = (true, vec![device("phone", true)]);
+        drop.send = Some(send);
+        assert_eq!(drop.send_click(SendHit::Row(0)), (None, true));
+        assert_eq!(drop.send_click(SendHit::Go), (None, true));
+        assert_eq!(drop.send_closed(), None);
+        assert!(drop.send.is_none());
+    }
+
+    #[test]
+    fn the_switch_shows_receiving_not_running() {
+        let mut drop = DropUi::default();
+        // A daemon that only runs to send: the switch stays off.
+        drop.apply(FromDaemon::State { alias: "水滴".into(), address: Some("192.0.2.33".into()), quick: false, receiving: false });
+        assert!(!drop.on);
+        assert!(matches!(tile_request(drop.on, drop.starting), Some(Request::Start)));
+        drop.apply(FromDaemon::State { alias: "水滴".into(), address: Some("192.0.2.33".into()), quick: false, receiving: true });
+        assert!(drop.on);
+        // Switched off while an offer waits: the offer goes.
+        drop.apply(offer("s1"));
+        assert!(drop.apply(FromDaemon::State { alias: "水滴".into(), address: None, quick: false, receiving: false }));
+        assert!(!drop.on && drop.notice.is_none());
     }
 }

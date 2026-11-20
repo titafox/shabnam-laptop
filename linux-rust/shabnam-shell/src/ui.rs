@@ -53,6 +53,8 @@ pub enum Panel {
     Quick,
     /// Nothing but a context menu (the one of a shelf icon).
     Menu,
+    /// 隔空传送: the picker that asks where files are to be sent (drop_ui.rs).
+    Send,
 }
 
 /// What main.rs has to do after an input event.
@@ -968,6 +970,7 @@ impl Ui {
         self.menu = None;
         match panel {
             Panel::Menu => self.menu = self.menu_request.take(),
+            Panel::Send => {}
             Panel::Launcher => {
                 self.refresh_apps();
                 self.query.clear();
@@ -994,6 +997,10 @@ impl Ui {
     }
 
     pub fn closed(&mut self) {
+        // The picker going away undecided withdraws its send request.
+        if self.open == Some(Panel::Send) {
+            self.send_panel_closed();
+        }
         self.open = None;
         self.drag = None;
         self.armed = None;
@@ -1013,6 +1020,7 @@ impl Ui {
             Some(Panel::Launcher) => self.draw_launcher(c),
             Some(Panel::Quick) if self.quick_view == QuickView::Main => self.draw_quick(c),
             Some(Panel::Quick) => self.draw_wifi(c),
+            Some(Panel::Send) => self.draw_send(c),
             Some(Panel::Menu) | None => {}
         }
         self.draw_menu(c);
@@ -1618,6 +1626,7 @@ impl Ui {
             (Some(_), _) if self.menu.is_some() => Act::None,
             (Some(Panel::Launcher), key) => self.launcher_key(key),
             (Some(Panel::Quick), key) => self.quick_key(key),
+            (Some(Panel::Send), key) => self.send_key(key),
             _ => Act::None,
         }
     }
@@ -1639,6 +1648,7 @@ impl Ui {
                 }
             }
             (Where::Notice, _) => self.notice_move(x, y),
+            (Where::Panel, Some(Panel::Send)) => self.send_move(x, y),
             (Where::Panel, Some(Panel::Quick)) if self.quick_view != QuickView::Main => {
                 let hit = self.wifi_hit(x, y);
                 if hit != self.wifi.hover {
@@ -1683,6 +1693,9 @@ impl Ui {
             Where::Notice => self.notice_leave(),
             Where::Panel => {
                 let menu_hover = self.menu.as_mut().and_then(|m| m.hover.take());
+                if self.send_leave() {
+                    self.dirty_panel = true;
+                }
                 if self.quick_hover.take().is_some() || self.armed.take().is_some() || self.wifi.hover.take().is_some() || menu_hover.is_some() {
                     self.dirty_panel = true;
                 }
@@ -1701,6 +1714,15 @@ impl Ui {
             }
             (Where::Panel, Some(_)) if self.menu.is_some() => self.menu_press(x, y, button),
             (Where::Panel, Some(Panel::Menu)) => Act::Close,
+            (Where::Panel, Some(Panel::Send)) => {
+                if !self.send_inside(x, y) {
+                    Act::Close
+                } else if button == BTN_LEFT {
+                    self.send_press(x, y)
+                } else {
+                    Act::None
+                }
+            }
             (Where::Panel, Some(Panel::Launcher)) => {
                 if !inside(self.launcher_rect(), x, y) {
                     return Act::Close;
@@ -1752,6 +1774,9 @@ impl Ui {
                 self.scroll = scroll;
                 self.dirty_panel = true;
             }
+        }
+        if place == Where::Panel && self.open == Some(Panel::Send) {
+            self.send_scroll(steps);
         }
         if place == Where::Panel && self.open == Some(Panel::Quick) && self.quick_view == QuickView::Wifi {
             let most = (self.wifi.rows.len() as f32 * WIFI_ROW - self.wifi_layout().body.3).max(0.0);

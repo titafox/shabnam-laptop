@@ -1,85 +1,91 @@
-//! shabnam-send [--yes] [--to NAME-or-ADDRESS] FILE... — sends files to a LocalSend-compatible
-//! device on the home Wi-Fi. Without --to it lists the devices it found and asks which one.
+//! shabnam-send FILE... — sends files to a LocalSend-compatible device on the home Wi-Fi.
+//! The device is chosen on the screen: the desktop shell shows the devices that were found, with
+//! name, address and certificate fingerprint, and the owner clicks one. This program only hands
+//! the files over and reports how it went; started from the file manager's 「发送到附近的设备…」
+//! it needs no terminal.
 //!
-//! Who it runs as: the desktop runs as root, and a program that talks to other machines must
-//! not. Started by root, this program opens the files first (so files under /root can be sent),
-//! then gives up root for good — it becomes the receiver's own user "shabnam-drop", which nothing
-//! else (not the browser) runs as — and only then touches the network. The other device sees
-//! the same name and certificate as the receiver (shabnam-dropd).
+//!   shabnam-send FILE...                        choose the device on the screen
+//!   shabnam-send --to NAME-or-ADDRESS FILE...   root only (a terminal, a script): send to that
+//!                                               device after showing it and asking y/N
+//!   shabnam-send --yes --to NAME-or-ADDRESS FILE...   the same without the question
 //!
-//! Devices: when the receiver is running it is asked for the devices it knows (it owns the
-//! protocol's port) — after checking that the process on the socket really is the receiver's
-//! user; otherwise this program listens on the Wi-Fi address itself for the few seconds the
-//! search takes, declining anything offered to it meanwhile.
+//! How: the files are opened here, with the rights of the desktop's unprivileged user "shabnam"
+//! (started by root, this program first becomes that user for good — root's files are never
+//! opened), and the open descriptors are passed to the 隔空传送 daemon over its submit socket
+//! (../fdpass.rs). The daemon does the network part as its own user. If it is not running, the
+//! shell is asked — by a bare connection to its wake socket — to start it for this request.
 //!
-//! Before anything leaves, the target is shown — name, address, certificate fingerprint — and,
-//! when the files were opened with root's rights, the owner must confirm it (or have said --yes
-//! on the command line). The connection then accepts only that certificate.
+//! This program cannot say where the files go: the submit socket has no message for it. The one
+//! exception is root's `--to`, which the daemon accepts only on a connection that root made
+//! (the kernel records who connected; the connection is made before root is given up).
 
-use bytes::Bytes;
-use localsend::http::client::{ClientError, LsHttpClient, LsHttpClientVersion};
-use localsend::http::dto::{PrepareUploadRequestDto, RegisterDto};
-use localsend::http::server::v2::{PrepareUploadDecisionV2, ServerEventV2};
-use localsend::model::discovery::{DeviceType, ProtocolType, PROTOCOL_VERSION_V2};
-use localsend::model::transfer::{FileContent, FileDto};
-use shabnam_drop::ipc::{self, Device, FromDaemon, ToDaemon};
-use shabnam_drop::net::{self, Identity, Net};
+use shabnam_drop::ipc::{self, Device, FromSubmit, SendOutcome, SubmitRefusal, ToSubmit};
 use shabnam_drop::policy::{self, Lang};
-use std::collections::HashMap;
+use shabnam_drop::{fdpass, net};
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::os::fd::AsRawFd;
+use std::os::unix::net::UnixStream;
 use std::time::Duration;
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
-
-const USER: &str = ipc::DAEMON_USER;
 
 /// Everything this program says, in the system's three languages (zh, ru, en).
 #[derive(Clone, Copy)]
 enum Say {
     Usage,
     NotAFile,
+    ToNeedsRoot,
+    NoDesktop,
+    NotStarted,
+    ChooseOnScreen,
     Searching,
-    NoDevices,
-    NoWifi,
-    Choose,
     Target,
     Fingerprint,
     Unencrypted,
     Confirm,
-    NoSuchDevice,
     Waiting,
+    Sent,
     Declined,
     Busy,
-    PinNeeded,
-    Sent,
-    Failed,
     Cancelled,
-    PressEnter,
+    PinNeeded,
+    Unreachable,
+    FileChanged,
+    NoAnswer,
+    NoSuchDevice,
+    Failed,
+    RefusedBusy,
+    RefusedTooMany,
+    RefusedTooBig,
+    RefusedNoScreen,
 }
 
 fn say(lang: Lang, what: Say) -> &'static str {
     let (zh, ru, en) = match what {
-        Say::Usage => ("用法：shabnam-send [--yes] [--to 设备名或地址] 文件…", "Использование: shabnam-send [--yes] [--to ИМЯ-или-АДРЕС] ФАЙЛ…", "usage: shabnam-send [--yes] [--to NAME-or-ADDRESS] FILE..."),
+        Say::Usage => ("用法：shabnam-send [[--yes] --to 设备名或地址] 文件…", "Использование: shabnam-send [[--yes] --to ИМЯ-или-АДРЕС] ФАЙЛ…", "usage: shabnam-send [[--yes] --to NAME-or-ADDRESS] FILE..."),
         Say::NotAFile => ("不是普通文件，已跳过", "не обычный файл, пропущен", "not a regular file, skipped"),
-        Say::Searching => ("正在查找附近的设备…", "Поиск устройств поблизости…", "Looking for nearby devices…"),
-        Say::NoDevices => ("没有找到设备。请在对方设备上打开 LocalSend，并确认连着同一个 Wi-Fi。", "Устройства не найдены. Откройте LocalSend на другом устройстве в той же сети Wi-Fi.", "No devices found. Open LocalSend on the other device, on the same Wi-Fi."),
-        Say::NoWifi => ("Wi-Fi 未连接。", "Wi-Fi не подключён.", "Wi-Fi is not connected."),
-        Say::Choose => ("发送到哪台设备？输入编号后回车（直接回车取消）：", "На какое устройство отправить? Номер и Enter (пустая строка — отмена): ", "Send to which device? Number, then Enter (empty to cancel): "),
+        Say::ToNeedsRoot => ("--to 只能由 root 使用；请直接运行 shabnam-send 文件…，然后在屏幕上选择设备。", "--to доступен только root. Запустите shabnam-send ФАЙЛ… и выберите устройство на экране.", "--to is for root only; run shabnam-send FILE... and choose the device on the screen."),
+        Say::NoDesktop => ("隔空传送没有运行，桌面也没有应答（root 可先运行 shabnam-drop start send）。", "Передача файлов не запущена, и рабочий стол не отвечает (root может выполнить shabnam-drop start send).", "Nearby share is not running and the desktop does not answer (root can run shabnam-drop start send)."),
+        Say::NotStarted => ("隔空传送没有启动。", "Передача файлов не запустилась.", "Nearby share did not start."),
+        Say::ChooseOnScreen => ("请在屏幕上选择接收设备…", "Выберите устройство на экране…", "Choose the device on the screen…"),
+        Say::Searching => ("正在查找设备…", "Поиск устройства…", "Looking for the device…"),
         Say::Target => ("发送到", "Получатель", "Sending to"),
         Say::Fingerprint => ("证书指纹", "отпечаток сертификата", "certificate fingerprint"),
-        Say::Unencrypted => ("未加密，无法确认对方身份", "без шифрования, получателя нельзя проверить", "not encrypted, the device cannot be verified"),
+        Say::Unencrypted => ("未加密，无法确认对方身份", "без шифрования, устройство нельзя проверить", "not encrypted, the device cannot be verified"),
         Say::Confirm => ("确认发送？输入 y 后回车：", "Отправить? Введите y и Enter: ", "Send? Type y, then Enter: "),
-        Say::NoSuchDevice => ("找不到这台设备", "Устройство не найдено", "No such device"),
         Say::Waiting => ("等待对方接受…", "Ожидание подтверждения…", "Waiting for the other side to accept…"),
+        Say::Sent => ("已发送", "Отправлено", "Sent"),
         Say::Declined => ("对方拒绝了。", "Получатель отклонил передачу.", "The other side declined."),
         Say::Busy => ("对方正忙。", "Получатель занят.", "The other side is busy."),
-        Say::PinNeeded => ("对方要求 PIN，暂不支持。", "Получатель требует PIN — пока не поддерживается.", "The other side wants a PIN, which is not supported yet."),
-        Say::Sent => ("已发送", "Отправлено", "Sent"),
-        Say::Failed => ("发送失败", "Не удалось отправить", "Sending failed"),
         Say::Cancelled => ("已取消。", "Отменено.", "Cancelled."),
-        Say::PressEnter => ("按回车关闭。", "Нажмите Enter, чтобы закрыть.", "Press Enter to close."),
+        Say::PinNeeded => ("对方要求 PIN：请不带 --to 运行，在屏幕上输入。", "Получатель требует PIN-код: запустите без --to и введите его на экране.", "The other side wants a PIN: run without --to and type it on the screen."),
+        Say::Unreachable => ("无法连接到对方设备。", "Не удалось подключиться к устройству.", "Could not connect to the device."),
+        Say::FileChanged => ("读取文件时出错。", "Ошибка чтения файла.", "A file could not be read."),
+        Say::NoAnswer => ("对方没有回应。", "Устройство не ответило.", "The device did not answer."),
+        Say::NoSuchDevice => ("找不到这台设备。", "Устройство не найдено.", "No such device."),
+        Say::Failed => ("发送失败。", "Не удалось отправить.", "Sending failed."),
+        Say::RefusedBusy => ("正在进行另一次传送，请稍后再试。", "Идёт другая передача, попробуйте позже.", "Another transfer is going on, try again later."),
+        Say::RefusedTooMany => ("文件数量超过上限（500 个）。", "Больше 500 файлов.", "More than 500 files."),
+        Say::RefusedTooBig => ("超过单次 8 GB 的上限。", "Больше 8 ГБ за один раз.", "More than 8 GB at once."),
+        Say::RefusedNoScreen => ("桌面没有运行，无法选择设备（root 可用 --to）。", "Рабочий стол не запущен, устройство выбрать негде (root может указать --to).", "The desktop is not running, so no device can be chosen (root can use --to)."),
     };
     match lang {
         Lang::Zh => zh,
@@ -88,66 +94,11 @@ fn say(lang: Lang, what: Say) -> &'static str {
     }
 }
 
-struct Outgoing {
-    name: String,
-    size: u64,
-    file: std::fs::File,
-}
-
-fn file_type(name: &str) -> &'static str {
-    let extension = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    match extension.as_str() {
-        "jpg" | "jpeg" => "image/jpeg",
-        "png" => "image/png",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "heic" => "image/heic",
-        "mp4" | "m4v" => "video/mp4",
-        "mov" => "video/quicktime",
-        "mkv" => "video/x-matroska",
-        "webm" => "video/webm",
-        "mp3" => "audio/mpeg",
-        "flac" => "audio/flac",
-        "wav" => "audio/wav",
-        "pdf" => "application/pdf",
-        "zip" => "application/zip",
-        "apk" => "application/vnd.android.package-archive",
-        "txt" | "log" | "md" => "text/plain",
-        _ => "application/octet-stream",
-    }
-}
-
-/// Becomes the unprivileged user for good. Called before any network code runs.
-fn drop_root() -> Result<(), String> {
-    if unsafe { libc::geteuid() } != 0 {
-        return Ok(());
-    }
-    let (uid, gid, home) = net::user(USER).ok_or_else(|| format!("user {USER} is missing"))?;
-    if uid == 0 {
-        return Err(format!("user {USER} is root"));
-    }
-    let done = unsafe { libc::setgroups(1, &gid) == 0 && libc::setgid(gid) == 0 && libc::setuid(uid) == 0 };
-    // It must not be possible to get root back.
-    if !done || unsafe { libc::setuid(0) } == 0 || unsafe { libc::getuid() } != uid {
-        return Err("could not give up root".into());
-    }
-    std::env::set_var("HOME", &home);
-    std::env::set_var("USER", USER);
-    for name in ["XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "LD_LIBRARY_PATH", "LD_PRELOAD"] {
-        std::env::remove_var(name);
-    }
-    let _ = std::env::set_current_dir(&home);
-    Ok(())
-}
-
 fn main() {
     let lang = policy::lang();
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    // In a terminal window of its own (from the file manager) the result must stay readable.
-    let hold = args.first().is_some_and(|a| a == "--hold");
-    if hold {
-        args.remove(0);
-    }
+    // Accepted and ignored: the old launcher entry ran this program in a terminal with --hold.
+    args.retain(|a| a != "--hold");
     let yes = args.first().is_some_and(|a| a == "--yes");
     if yes {
         args.remove(0);
@@ -157,156 +108,55 @@ fn main() {
         to = Some(args.remove(1));
         args.remove(0);
     }
-    let code = match run(lang, yes, to, args) {
-        Ok(()) => 0,
+    match run(lang, yes, to, args) {
+        Ok(true) => {}
+        Ok(false) => std::process::exit(1),
         Err(e) => {
             eprintln!("shabnam-send: {e}");
-            1
-        }
-    };
-    if hold {
-        println!("\n{}", say(lang, Say::PressEnter));
-        let _ = std::io::stdin().read_line(&mut String::new());
-    }
-    std::process::exit(code);
-}
-
-fn run(lang: Lang, yes: bool, to: Option<String>, paths: Vec<String>) -> Result<(), String> {
-    unsafe { libc::umask(0o077) };
-    if paths.is_empty() || paths.iter().any(|p| p.starts_with("--")) {
-        return Err(say(lang, Say::Usage).into());
-    }
-    // As whoever started us: open what is to be sent. Only regular files, opened once; what is
-    // sent later is read from these open files, not looked up by name again.
-    let mut files = Vec::new();
-    for path in &paths {
-        let file = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
-        let meta = file.metadata().map_err(|e| format!("{path}: {e}"))?;
-        if !meta.is_file() {
-            eprintln!("{path}: {}", say(lang, Say::NotAFile));
-            continue;
-        }
-        let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
-        files.push(Outgoing { name, size: meta.len(), file });
-    }
-    if files.is_empty() {
-        return Err(say(lang, Say::Usage).into());
-    }
-    // Files opened with root's rights never leave without the owner's word for the target.
-    let confirm = unsafe { libc::geteuid() } == 0 && !yes;
-    drop_root()?;
-    if std::env::var_os("SHABNAM_DROP_LOG").is_some() {
-        let _ = tracing_subscriber::fmt().with_writer(std::io::stderr).try_init();
-    }
-    let identity = Identity::load_or_generate(&net::config_dir()?, policy::alias(lang))?;
-    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().map_err(|e| e.to_string())?;
-    runtime.block_on(send(lang, confirm, identity, to, files))
-}
-
-/// Asks the running receiver for its device list; None when it is not running — or when what
-/// answers on its socket is not the receiver's user (then this program searches by itself).
-fn devices_from_daemon() -> Option<Vec<Device>> {
-    let mut stream = net::connect_daemon()?;
-    stream.write_all(ToDaemon::Devices.encode().as_bytes()).ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(4))).ok()?;
-    let mut lines = ipc::Lines::default();
-    let mut chunk = [0u8; 4096];
-    loop {
-        let n = stream.read(&mut chunk).ok().filter(|n| *n > 0)?;
-        for line in lines.push(&chunk[..n]).ok()? {
-            if let Some(FromDaemon::Devices(list)) = ipc::parse_from_daemon(&line) {
-                return Some(list);
-            }
+            std::process::exit(1);
         }
     }
 }
 
-/// Searches by itself: listens on the Wi-Fi address while announcing, declines anything offered.
-async fn devices_by_search(identity: &Identity) -> Result<Vec<Device>, String> {
-    let interface = net::interface_name()?;
-    let (address, netmask) = net::interface_address(&interface).ok_or("no-wifi")?;
-    let (server_tx, mut server_rx) = mpsc::channel(16);
-    let (discovery_tx, mut discovery_rx) = mpsc::channel(16);
-    let net = Net::start(identity, address, netmask, server_tx, discovery_tx).await?;
-    let discovery = net.discovery.clone();
-    let own = identity.fingerprint.clone();
-    let answering = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                Some(event) = server_rx.recv() => match event {
-                    ServerEventV2::Register { ip, info } if info.fingerprint != own && policy::same_network(ip.ip, address, netmask) => {
-                        let device = localsend::discovery::DiscoveredDevice {
-                            alias: info.alias,
-                            version: info.version,
-                            device_model: info.device_model,
-                            device_type: info.device_type,
-                            fingerprint: info.fingerprint,
-                            channel: localsend::discovery::DeviceChannel::Http(localsend::discovery::HttpChannel { host: ip.to_string(), port: info.port, protocol: info.protocol }),
-                            download: info.download,
-                        };
-                        discovery.observe_inbound(device).await;
-                    }
-                    ServerEventV2::PrepareUpload { decision_tx, .. } => {
-                        let _ = decision_tx.send(PrepareUploadDecisionV2::Decline);
-                    }
-                    _ => {}
-                },
-                Some(_) = discovery_rx.recv() => {}
-                else => break,
-            }
+/// Connects to the daemon's submit socket — only if the other end really is the daemon's user.
+/// When the daemon is not running, the shell is asked to start it and the socket is tried again.
+fn connect(lang: Lang) -> Result<UnixStream, String> {
+    let daemon = net::user(ipc::DAEMON_USER).map(|(uid, _, _)| uid).filter(|uid| *uid != 0).ok_or_else(|| format!("user {} is missing", ipc::DAEMON_USER))?;
+    let attempt = || UnixStream::connect(ipc::submit_path()).ok().filter(|stream| net::peer_uid(stream) == Some(daemon));
+    if let Some(stream) = attempt() {
+        return Ok(stream);
+    }
+    // The wake socket is root's (the shell). Nothing is said on it: the connection is the request.
+    let _wake = UnixStream::connect(ipc::wake_path()).ok().filter(|stream| net::peer_uid(stream) == Some(0)).ok_or_else(|| say(lang, Say::NoDesktop).to_string())?;
+    for _ in 0..60 {
+        std::thread::sleep(Duration::from_millis(200));
+        if let Some(stream) = attempt() {
+            return Ok(stream);
         }
-    });
-    let staged = net.discovery.discover_staged(Vec::new(), vec![address], net::PORT, ProtocolType::Https, Duration::from_secs(2));
-    let _ = tokio::time::timeout(Duration::from_secs(8), staged).await;
-    let list = net
-        .discovery
-        .devices()
-        .iter()
-        .filter_map(|d| {
-            let http = d.get_best_channel()?.http()?;
-            Some(Device {
-                alias: ipc::tidy(&d.device.alias, 120),
-                fingerprint: d.device.fingerprint.clone(),
-                host: http.host.clone(),
-                port: http.port,
-                https: http.protocol == ProtocolType::Https,
-            })
-        })
-        .collect();
-    answering.abort();
-    net.stop().await;
-    Ok(list)
+    }
+    Err(say(lang, Say::NotStarted).into())
 }
 
-fn choose(lang: Lang, devices: &[Device], to: Option<&str>) -> Result<Option<Device>, String> {
-    if let Some(wanted) = to {
-        let found = devices.iter().find(|d| d.alias.eq_ignore_ascii_case(wanted) || d.alias == wanted || d.host == wanted);
-        return found.cloned().map(Some).ok_or_else(|| format!("{}: {wanted}", say(lang, Say::NoSuchDevice)));
+/// Started by root: becomes the desktop's unprivileged user for good, before any file is opened.
+fn become_desktop_user() -> Result<(), String> {
+    if unsafe { libc::geteuid() } != 0 {
+        return Ok(());
     }
-    for (i, device) in devices.iter().enumerate() {
-        println!("  {}  {}  ({}, {})", i + 1, device.alias, device.host, short(&device.fingerprint));
+    let (uid, gid, home) = net::user(ipc::DESKTOP_USER).filter(|(uid, _, _)| *uid != 0).ok_or_else(|| format!("user {} is missing", ipc::DESKTOP_USER))?;
+    let name = std::ffi::CString::new(ipc::DESKTOP_USER).unwrap();
+    let done = unsafe { libc::initgroups(name.as_ptr(), gid as _) == 0 && libc::setgid(gid) == 0 && libc::setuid(uid) == 0 };
+    // It must not be possible to get root back.
+    if !done || unsafe { libc::setuid(0) } == 0 || unsafe { libc::getuid() } != uid || unsafe { libc::geteuid() } != uid {
+        return Err("could not give up root".into());
     }
-    print!("{}", say(lang, Say::Choose));
-    let _ = std::io::stdout().flush();
-    let mut line = String::new();
-    std::io::stdin().read_line(&mut line).map_err(|e| e.to_string())?;
-    let line = line.trim();
-    if line.is_empty() {
-        return Ok(None);
-    }
-    let index = line.parse::<usize>().ok().filter(|n| (1..=devices.len()).contains(n)).ok_or_else(|| say(lang, Say::NoSuchDevice).to_string())?;
-    Ok(Some(devices[index - 1].clone()))
-}
-
-/// A fingerprint in a form a person can compare: the first 16 characters, in groups of four.
-fn short(fingerprint: &str) -> String {
-    let head: Vec<char> = fingerprint.chars().filter(char::is_ascii_alphanumeric).take(16).collect();
-    head.chunks(4).map(|group| group.iter().collect::<String>()).collect::<Vec<_>>().join(" ")
+    std::env::set_var("HOME", &home);
+    std::env::set_var("USER", ipc::DESKTOP_USER);
+    Ok(())
 }
 
 /// The line that says where the files are about to go.
 fn describe(lang: Lang, device: &Device) -> String {
-    let proof = if device.https { format!("{} {}", say(lang, Say::Fingerprint), short(&device.fingerprint)) } else { say(lang, Say::Unencrypted).to_string() };
+    let proof = if device.https { format!("{} {}", say(lang, Say::Fingerprint), ipc::short_fingerprint(&device.fingerprint)) } else { say(lang, Say::Unencrypted).to_string() };
     format!("{}: {}  {}:{}  {proof}", say(lang, Say::Target), device.alias, device.host, device.port)
 }
 
@@ -315,151 +165,162 @@ fn is_yes(answer: &str) -> bool {
     matches!(answer.trim(), "y" | "Y" | "yes" | "YES" | "д" | "Д" | "да" | "是")
 }
 
-/// Feeds an already open file to the upload, chunk by chunk.
-fn content_of(file: std::fs::File, cancel: CancellationToken) -> FileContent {
-    let (tx, rx) = mpsc::channel::<Bytes>(4);
-    tokio::task::spawn_blocking(move || {
-        let mut file = file;
-        loop {
-            let mut chunk = vec![0u8; 256 * 1024];
-            match file.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(n) => {
-                    chunk.truncate(n);
-                    if tx.blocking_send(Bytes::from(chunk)).is_err() {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    // A short upload must not pass for the whole file.
-                    eprintln!("shabnam-send: {e}");
-                    cancel.cancel();
-                    break;
-                }
-            }
-        }
-    });
-    FileContent::Stream(rx)
+fn outcome_text(lang: Lang, outcome: SendOutcome) -> &'static str {
+    say(lang, match outcome {
+        SendOutcome::Sent => Say::Sent,
+        SendOutcome::Declined => Say::Declined,
+        SendOutcome::Busy => Say::Busy,
+        SendOutcome::Cancelled => Say::Cancelled,
+        SendOutcome::PinNeeded => Say::PinNeeded,
+        SendOutcome::Unreachable => Say::Unreachable,
+        SendOutcome::FileChanged => Say::FileChanged,
+        SendOutcome::NoAnswer => Say::NoAnswer,
+        SendOutcome::NoSuchDevice => Say::NoSuchDevice,
+        SendOutcome::Failed => Say::Failed,
+    })
 }
 
-async fn send(lang: Lang, confirm: bool, identity: Identity, to: Option<String>, files: Vec<Outgoing>) -> Result<(), String> {
-    println!("{}", say(lang, Say::Searching));
-    let devices = match tokio::task::spawn_blocking(devices_from_daemon).await.ok().flatten() {
-        Some(list) => list,
-        None => match devices_by_search(&identity).await {
-            Ok(list) => list,
-            Err(e) if e == "no-wifi" => return Err(say(lang, Say::NoWifi).into()),
-            Err(e) => return Err(e),
-        },
-    };
-    if devices.is_empty() {
-        return Err(say(lang, Say::NoDevices).into());
-    }
-    let Some(device) = choose(lang, &devices, to.as_deref())? else {
-        println!("{}", say(lang, Say::Cancelled));
-        return Ok(());
-    };
-    println!("{}", describe(lang, &device));
-    if confirm {
-        print!("{}", say(lang, Say::Confirm));
-        let _ = std::io::stdout().flush();
-        let mut answer = String::new();
-        if std::io::stdin().read_line(&mut answer).is_err() || !is_yes(&answer) {
-            println!("{}", say(lang, Say::Cancelled));
-            return Ok(());
-        }
-    }
-    let protocol = if device.https { ProtocolType::Https } else { ProtocolType::Http };
-    // The certificate the device showed when it was found is the only one accepted now.
-    let pinned = device.https.then(|| device.fingerprint.clone());
-    let client = LsHttpClient::new(&identity.key_pem, &identity.cert_pem, LsHttpClientVersion::V2, pinned, None).map_err(|e| e.to_string())?;
+fn refusal_text(lang: Lang, why: SubmitRefusal) -> &'static str {
+    say(lang, match why {
+        SubmitRefusal::Busy => Say::RefusedBusy,
+        SubmitRefusal::TooMany => Say::RefusedTooMany,
+        SubmitRefusal::TooBig => Say::RefusedTooBig,
+        SubmitRefusal::NotAFile => Say::NotAFile,
+        SubmitRefusal::NotAllowed => Say::ToNeedsRoot,
+        SubmitRefusal::NoScreen => Say::RefusedNoScreen,
+        SubmitRefusal::Bad => Say::Failed,
+    })
+}
 
-    let mut dtos = HashMap::new();
-    let mut sources = HashMap::new();
-    for (i, file) in files.into_iter().enumerate() {
-        let id = format!("f{i}");
-        dtos.insert(id.clone(), FileDto { id: id.clone(), file_name: file.name.clone(), size: file.size, file_type: file_type(&file.name).to_string(), sha256: None, preview: None, metadata: None });
-        sources.insert(id, file);
-    }
-    let cancel = CancellationToken::new();
-    tokio::spawn({
-        let cancel = cancel.clone();
-        async move {
-            let _ = tokio::signal::ctrl_c().await;
-            cancel.cancel();
-        }
-    });
-    let info = RegisterDto {
-        alias: identity.alias.clone(),
-        version: PROTOCOL_VERSION_V2.to_string(),
-        device_model: Some("Shabnam".into()),
-        device_type: Some(DeviceType::Desktop),
-        token: identity.fingerprint.clone(),
-        port: net::PORT,
-        protocol: ProtocolType::Https,
-        has_web_interface: false,
-    };
-    println!("{} → {}  {}", identity.alias, device.alias, say(lang, Say::Waiting));
-    let prepared = client.prepare_upload(protocol, &device.host, device.port, None, PrepareUploadRequestDto { info, files: dtos.clone() }, None, cancel.clone()).await;
-    let prepared = match prepared {
-        Ok(prepared) => prepared,
-        Err(ClientError::Cancelled) => return Err(say(lang, Say::Cancelled).into()),
-        Err(ClientError::StatusCode(e)) => {
-            return Err(match e.status {
-                401 => say(lang, Say::PinNeeded).to_string(),
-                403 => say(lang, Say::Declined).to_string(),
-                409 => say(lang, Say::Busy).to_string(),
-                status => format!("{} (HTTP {status})", say(lang, Say::Failed)),
-            })
-        }
-        Err(e) => return Err(format!("{}: {e}", say(lang, Say::Failed))),
-    };
-    let Some(response) = prepared.response.filter(|r| !r.session_id.is_empty() && !r.files.is_empty()) else {
-        return Err(say(lang, Say::Declined).into());
-    };
-    let total: u64 = response.files.keys().filter_map(|id| dtos.get(id)).map(|f| f.size).sum();
-    let sent = Arc::new(AtomicU64::new(0));
-    let mut ids: Vec<&String> = response.files.keys().filter(|id| dtos.contains_key(*id)).collect();
-    ids.sort();
-    let mut base = 0u64;
-    let mut count = 0;
-    for id in ids {
-        let Some(source) = sources.remove(id) else { continue };
-        let (sent_now, name, size) = (sent.clone(), source.name.clone(), source.size);
-        let progress = move |bytes: u64| {
-            let now = base + bytes;
-            // One line per 5 %: enough to see it move, readable in a log.
-            let step = (total / 20).max(1);
-            if now / step != sent_now.swap(now, Ordering::Relaxed) / step {
-                eprint!("\r{:3}%", (now * 100).checked_div(total).unwrap_or(100).min(100));
+/// The daemon's answers, a line at a time.
+struct Answers<'a> {
+    stream: &'a UnixStream,
+    lines: ipc::Lines,
+    ready: std::collections::VecDeque<FromSubmit>,
+}
+
+impl Answers<'_> {
+    /// None: the daemon closed the connection (or said something that is not an answer).
+    fn next(&mut self) -> Option<FromSubmit> {
+        let mut chunk = [0u8; 2048];
+        loop {
+            if let Some(answer) = self.ready.pop_front() {
+                return Some(answer);
             }
-        };
-        let content = content_of(source.file, cancel.clone());
-        let result = client.upload(protocol, &device.host, device.port, None, &response.session_id, id, &response.files[id], content, progress, cancel.clone()).await;
-        if let Err(e) = result {
-            eprintln!();
-            let _ = client.cancel(protocol, &device.host, device.port, &response.session_id).await;
-            return Err(match e {
-                ClientError::Cancelled => say(lang, Say::Cancelled).to_string(),
-                e => format!("{} {name}: {e}", say(lang, Say::Failed)),
-            });
+            let n = match (&*self.stream).read(&mut chunk) {
+                Ok(n) if n > 0 => n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                _ => return None,
+            };
+            self.ready.extend(self.lines.push(&chunk[..n]).ok()?.iter().filter_map(|line| ipc::parse_from_submit(line)));
         }
-        base += size;
-        count += 1;
     }
-    eprintln!("\r100%");
-    println!("{} {count} → {}", say(lang, Say::Sent), device.alias);
-    Ok(())
+}
+
+/// Ok(true): everything was sent.
+fn run(lang: Lang, yes: bool, to: Option<String>, paths: Vec<String>) -> Result<bool, String> {
+    if paths.is_empty() || paths.iter().any(|p| p.starts_with("--")) {
+        return Err(say(lang, Say::Usage).into());
+    }
+    if to.is_some() && unsafe { libc::geteuid() } != 0 {
+        return Err(say(lang, Say::ToNeedsRoot).into());
+    }
+    // First the connection (as whoever started us: root's is what lets --to through), then
+    // root is given up, and only then are the files opened — never with root's rights.
+    let stream = connect(lang)?;
+    become_desktop_user()?;
+    let mut files = Vec::new();
+    for path in &paths {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Non-blocking, so that a pipe someone put in place of a file cannot hold us up.
+        let file = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY).open(path).map_err(|e| format!("{path}: {e}"))?;
+        if !file.metadata().map_err(|e| format!("{path}: {e}"))?.is_file() {
+            eprintln!("{path}: {}", say(lang, Say::NotAFile));
+            continue;
+        }
+        let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
+        files.push((name, file));
+    }
+    if files.is_empty() {
+        return Err(say(lang, Say::Usage).into());
+    }
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(20)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(20)));
+    let mut answers = Answers { stream: &stream, lines: ipc::Lines::default(), ready: Default::default() };
+    let gone = || say(lang, Say::Failed).to_string();
+    for (name, file) in &files {
+        fdpass::send_line(&stream, &ToSubmit::File { name: name.clone() }.encode(), Some(file.as_raw_fd())).map_err(|e| e.to_string())?;
+        match answers.next().ok_or_else(gone)? {
+            FromSubmit::Ok => {}
+            FromSubmit::Refused(why) => return Err(format!("{name}: {}", refusal_text(lang, why))),
+            _ => return Err(gone()),
+        }
+    }
+    // The daemon holds the files now.
+    drop(files);
+    let auto = to.is_some();
+    (&stream).write_all(ToSubmit::Go { to }.encode().as_bytes()).map_err(|e| e.to_string())?;
+    let _ = stream.set_read_timeout(None);
+    if auto {
+        println!("{}", say(lang, Say::Searching));
+    }
+    let mut shown = u64::MAX;
+    loop {
+        match answers.next().ok_or_else(gone)? {
+            FromSubmit::Queued => println!("{}", say(lang, Say::ChooseOnScreen)),
+            FromSubmit::Refused(why) => return Err(refusal_text(lang, why).into()),
+            FromSubmit::Target(device) => {
+                println!("{}", describe(lang, &device));
+                if !yes {
+                    print!("{}", say(lang, Say::Confirm));
+                    let _ = std::io::stdout().flush();
+                    let mut answer = String::new();
+                    if std::io::stdin().read_line(&mut answer).is_err() || !is_yes(&answer) {
+                        // Closing the connection withdraws the request.
+                        println!("{}", say(lang, Say::Cancelled));
+                        return Ok(false);
+                    }
+                }
+                (&stream).write_all(ToSubmit::Confirm.encode().as_bytes()).map_err(|e| e.to_string())?;
+                println!("{}", say(lang, Say::Waiting));
+            }
+            FromSubmit::Progress { done, total } => {
+                // One step per 5 %: enough to see it move, readable in a log.
+                let percent = (done.saturating_mul(100)).checked_div(total).unwrap_or(100).min(100);
+                if percent / 5 != shown {
+                    shown = percent / 5;
+                    eprint!("\r{percent:3}%");
+                }
+            }
+            FromSubmit::Result { outcome, sent, to } => {
+                if shown != u64::MAX {
+                    eprintln!();
+                }
+                return match outcome {
+                    SendOutcome::Sent => {
+                        println!("{} {sent} → {to}", say(lang, Say::Sent));
+                        Ok(true)
+                    }
+                    SendOutcome::Cancelled => {
+                        println!("{}", say(lang, Say::Cancelled));
+                        Ok(false)
+                    }
+                    outcome => Err(outcome_text(lang, outcome).into()),
+                };
+            }
+            FromSubmit::Ok => {}
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shabnam_drop::ipc::DeviceKind;
 
     #[test]
     fn the_target_is_shown_in_full() {
-        let device = Device { alias: "Phone".into(), fingerprint: "AB12CD34EF56AB78FFFF0000".into(), host: "192.0.2.7".into(), port: 53317, https: true };
-        assert_eq!(short(&device.fingerprint), "AB12 CD34 EF56 AB78");
+        let device = Device { alias: "Phone".into(), fingerprint: "AB12CD34EF56AB78FFFF0000".into(), host: "192.0.2.7".into(), port: 53317, https: true, kind: DeviceKind::Mobile };
         let line = describe(Lang::En, &device);
         assert!(line.contains("Phone") && line.contains("192.0.2.7:53317") && line.contains("AB12 CD34 EF56 AB78"), "{line}");
         let plain = describe(Lang::En, &Device { https: false, ..device });

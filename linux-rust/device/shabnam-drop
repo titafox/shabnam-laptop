@@ -5,9 +5,13 @@
 #   shabnam-drop            show the switch (opens the shell's quick settings)
 #   shabnam-drop start      start receiving; stays in the foreground (the shell starts it detached
 #                           when the 「隔空传送」 switch in quick settings is turned on). Root only.
-#   shabnam-drop stop       stop receiving (closes the port)
-#   shabnam-drop status     prints "on" or "off"
-# Sending is a separate command: shabnam-send FILE...
+#   shabnam-drop start send start it for sending only: it declines whatever is offered to it, opens
+#                           the port only while a send request is there, and exits when idle (the
+#                           shell starts it like this when shabnam-send asks while receiving is off)
+#   shabnam-drop stop       stop it (closes the port)
+#   shabnam-drop status     prints "on" (receiving), "send" (running only to send) or "off"
+# Sending is a separate command: shabnam-send FILE... (the file manager's 「发送到附近的设备…」);
+# the device is then chosen in the shell's picker.
 #
 # Receiving is OFF until the owner switches it on, and off again after every restart.
 #
@@ -19,9 +23,13 @@
 #     useradd -u 701 -g 701 -M -d /var/lib/shabnam-drop -s /sbin/nologin -c "隔空传送" shabnam-drop
 # (once, at installation). What belongs to it:
 #     /var/lib/shabnam-drop   0700  its home: the certificate and key (.config/shabnam-drop/identity.pem)
-#     /run/shabnam-drop       0700  the control socket shabnam-drop.sock (0600)
-# The shell (root) and shabnam-send talk to that socket only after checking that the process
-# behind it is this user (SO_PEERCRED).
+#     /run/shabnam-drop       0700  the control socket shabnam-drop.sock (0600): root's shell only
+#     /run/shabnam-drop-submit 0750, group shabnam: the submit socket submit.sock, on which a
+#                             program of the desktop user (shabnam-send) hands over open files to
+#                             send. Nothing else can be said there — the target is chosen in the
+#                             shell's picker, by the owner (see ../drop/src/ipc.rs, outgoing.rs).
+# The shell (root) and shabnam-send talk to those sockets only after checking that the process
+# behind them is this user (SO_PEERCRED); the daemon checks who connects in the same way.
 #
 # Where files land: /home/shabnam/Downloads, where the owner's file manager, the browser and the
 # player find them. That directory stays the browser user's; `start` gives it the group
@@ -37,6 +45,7 @@ DROP_USER=shabnam-drop
 DESKTOP_USER=shabnam
 RUNTIME=/run/shabnam-drop
 INTERFACE=${SHABNAM_DROP_IFACE:-wlan0}
+SUBMIT=/run/shabnam-drop-submit
 
 fail() { echo "shabnam-drop: $*" >&2; exit 1; }
 
@@ -44,11 +53,12 @@ case ${1:-show} in
   show)
     exec shabnam-shell drop show ;;
   status)
-    if shabnam-dropd ctl - 0 >/dev/null 2>&1; then echo on; else echo off; exit 1; fi ;;
+    exec shabnam-dropd status ;;
   stop)
     shabnam-dropd ctl '{"t":"quit"}' 1 >/dev/null 2>&1; exit 0 ;;
   start)
     [ "$(id -u)" = 0 ] || fail "start: must be run by root (it drops to $DROP_USER itself)"
+    case ${2:-receive} in receive) receive=1 ;; send) receive=0 ;; *) fail "start: receive or send, not $2" ;; esac
     id -u "$DROP_USER" >/dev/null 2>&1 || fail "user $DROP_USER is missing (see the top of this script)"
     state=$(getent passwd "$DROP_USER" | cut -d: -f6)
     desktop_uid=$(id -u "$DESKTOP_USER") || fail "user $DESKTOP_USER is missing"
@@ -58,6 +68,9 @@ case ${1:-show} in
     for dir in "$RUNTIME" "$state"; do
       mkdir -p "$dir" && chown "$DROP_USER:$DROP_USER" "$dir" && chmod 700 "$dir" || fail "cannot prepare $dir"
     done
+    # Where the desktop user reaches the daemon to hand over files: that user's group may enter,
+    # only the daemon's user can put the socket there.
+    mkdir -p "$SUBMIT" && chown "$DROP_USER:$DESKTOP_USER" "$SUBMIT" && chmod 750 "$SUBMIT" || fail "cannot prepare $SUBMIT"
     # The downloads directory is inside another user's home. Root does nothing to it by name:
     # that user creates it if it is missing; then it is opened, and only the opened directory is
     # checked and changed (through the descriptor), so a link or swap cannot redirect root.
@@ -76,9 +89,9 @@ case ${1:-show} in
     exec setsid -w setpriv --no-new-privs --reuid "$DROP_USER" --regid "$DROP_USER" --init-groups \
       env -i HOME="$state" USER="$DROP_USER" LOGNAME="$DROP_USER" SHELL=/bin/sh \
         PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-zh_CN.UTF-8}" ${TZ:+TZ="$TZ"} \
-        SHABNAM_DROP_IFACE="$INTERFACE" SHABNAM_DROP_DIR_FD=3 \
+        SHABNAM_DROP_IFACE="$INTERFACE" SHABNAM_DROP_DIR_FD=3 SHABNAM_DROP_RECEIVE="$receive" \
         ${SHABNAM_DROP_LOG:+SHABNAM_DROP_LOG=1} \
         /usr/local/bin/shabnam-dropd ;;
   *)
-    echo "usage: shabnam-drop [start|stop|status]" >&2; exit 2 ;;
+    echo "usage: shabnam-drop [start [send]|stop|status]" >&2; exit 2 ;;
 esac

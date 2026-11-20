@@ -23,6 +23,12 @@
 //!   shabnam-shell test-menu APPID           the context menu of that app's shelf icon
 //!   shabnam-shell test-launcher-menu APPID  the launcher with the context menu of that app's entry
 //!   shabnam-shell test-drop offer|progress|done|text|refused   the 隔空传送 card with made-up content
+//!   shabnam-shell test-send demo list|searching|empty|nowifi|confirm|plain|pin|waiting|progress|sent|declined|failed
+//!                                           the 隔空传送 send picker / card with made-up content
+//!   shabnam-shell test-send row N|send|back|refresh|cancel|type TEXT|stop
+//!                                           in the picker that is really up: what a click on the
+//!                                           N-th device, 发送, 返回, 重新查找, 取消 would do; typing
+//!                                           a PIN; the cancel button of the "sending" card
 //!   shabnam-shell test-lang-menu            quick panel with the three language choices showing
 //!   shabnam-shell test-arm poweroff|reboot|mac|desktop   quick panel with that button asking for
 //!                                           its confirming click (which then only disarms it)
@@ -91,7 +97,7 @@ use wayland_client::{
 const DEFAULT_PATH: &str = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin";
 const COMMANDS: [&str; 7] = ["toggle-launcher", "toggle-quick", "close", "quit", "test-wifi", "test-wifi-password", "test-lang-menu"];
 /// Commands followed by one piece of text.
-const COMMANDS_WITH_TEXT: [&str; 8] = ["search", "osd", "test-menu", "test-launcher-menu", "drop", "test-drop", "lang", "test-arm"];
+const COMMANDS_WITH_TEXT: [&str; 9] = ["search", "osd", "test-menu", "test-launcher-menu", "drop", "test-drop", "lang", "test-arm", "test-send"];
 /// How long the volume / brightness indicator stays after the last change.
 const OSD_TIME: Duration = Duration::from_millis(1500);
 
@@ -139,7 +145,7 @@ fn main() {
             return;
         }
         _ => {
-            eprintln!("usage: shabnam-shell [{}|search TEXT|osd volume|osd brightness|drop on|drop off|drop show|lang zh|lang ru|lang en|test-menu APPID|test-launcher-menu APPID|test-drop KIND]", COMMANDS.join("|"));
+            eprintln!("usage: shabnam-shell [{}|search TEXT|osd volume|osd brightness|drop on|drop off|drop show|lang zh|lang ru|lang en|test-menu APPID|test-launcher-menu APPID|test-drop KIND|test-send ...]", COMMANDS.join("|"));
             std::process::exit(2);
         }
     }
@@ -329,6 +335,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 command if command.starts_with("test-drop ") => shell.ui.test_drop(command["test-drop ".len()..].trim()),
+                command if command.starts_with("test-send ") => {
+                    let act = shell.ui.test_send(command["test-send ".len()..].trim());
+                    shell.act(act);
+                }
                 // The same call the language row's choices make.
                 command if command.starts_with("lang ") => {
                     if let Some(language) = lang::Lang::from_code(&command["lang ".len()..]) {
@@ -409,9 +419,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }));
     event_loop.handle().insert_source(drop_source, |event, _, shell| {
         if let channel::Event::Msg(event) = event {
-            shell.ui.drop_event(event);
+            // A send request opens the picker; its end closes it.
+            let act = shell.ui.drop_event(event);
+            shell.act(act);
         }
     })?;
+    // Sending: a program of the desktop user that wants something sent, while the daemon is not
+    // running, connects here. Nothing is read from it; the daemon is started for sending.
+    if let Some(wake) = drop::wake_listener() {
+        event_loop.handle().insert_source(Generic::new(wake, Interest::READ, Mode::Level), |_, listener, shell| {
+            while let Ok((stream, _)) = listener.accept() {
+                if drop::wake_allowed(&stream) {
+                    shell.ui.drop_wake();
+                }
+            }
+            Ok(PostAction::Continue)
+        })?;
+    }
     // Its notices go away by themselves after a while.
     event_loop.handle().insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, shell| {
         shell.ui.drop_tick();

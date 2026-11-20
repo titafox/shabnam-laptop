@@ -1,7 +1,12 @@
-//! The shell's line to the 隔空传送 receiver (shabnam-dropd, ../../drop). The receiver runs as the
-//! unprivileged user "shabnam" and does everything that touches the network; the shell only
+//! The shell's line to the 隔空传送 daemon (shabnam-dropd, ../../drop). The daemon runs as its own
+//! unprivileged user "shabnam-drop" and does everything that touches the network; the shell only
 //! starts and stops it and exchanges the fixed messages of ipc.rs with it over a unix socket.
 //! A worker thread owns the connection, so nothing here can stall the event loop.
+//!
+//! Also here: the "wake" socket. The daemon can only be started by root, but the program that
+//! wants something sent (shabnam-send, started by the file manager) is the desktop's unprivileged
+//! user. It connects to this socket — nothing is read from it — and the shell starts the daemon
+//! for sending. What is to be sent, the requester then tells the daemon, not the shell.
 //!
 //! The receiver is not trusted: its lines are length-capped and parsed by ipc.rs (which strips
 //! control characters and drops anything malformed), and nothing it says is ever used as a path
@@ -23,8 +28,10 @@ pub enum Request {
     Probe,
     /// Start the receiver (if it is not running) and connect.
     Start,
-    /// Tell it to quit.
+    /// Switch receiving off (the daemon leaves by itself once it has nothing to send).
     Stop,
+    /// Somebody wants to send: start the daemon for that, unless it is running.
+    Wake,
     Send(ToDaemon),
 }
 
@@ -117,7 +124,8 @@ impl<F: Fn(Event) + Send + Clone + 'static> Worker<F> {
             }
             Request::Start => {
                 if self.connect() {
-                    return;
+                    // It is running (perhaps only to send): receiving is switched on.
+                    return self.send(&ToDaemon::Receive(true));
                 }
                 let started = crate::sys::spawn(&["shabnam-drop", "start"]).is_ok();
                 // It needs a moment to make its certificate on the very first start.
@@ -130,12 +138,24 @@ impl<F: Fn(Event) + Send + Clone + 'static> Worker<F> {
                 }
             }
             Request::Stop => {
-                self.connect();
-                self.send(&ToDaemon::Quit);
-                // From here on the old connection's end is expected, not news.
-                self.generation.fetch_add(1, Ordering::SeqCst);
-                self.stream = None;
-                (self.notify)(Event::Off { failed: false });
+                if self.connect() {
+                    // Its answer (a state with receiving off) is what turns the switch off.
+                    self.send(&ToDaemon::Receive(false));
+                }
+                if self.stream.is_none() {
+                    (self.notify)(Event::Off { failed: false });
+                }
+            }
+            Request::Wake => {
+                if self.connect() {
+                    return;
+                }
+                if crate::sys::spawn(&["shabnam-drop", "start", "send"]).is_ok() {
+                    let _ = (0..40).any(|_| {
+                        std::thread::sleep(Duration::from_millis(150));
+                        self.connect()
+                    });
+                }
             }
             Request::Send(message) => self.send(&message),
         }
@@ -152,4 +172,51 @@ pub fn start(notify: impl Fn(Event) + Send + Clone + 'static) -> mpsc::Sender<Re
         }
     });
     requests
+}
+
+fn ids_of(user: &str) -> Option<(u32, u32)> {
+    let user = std::ffi::CString::new(user).ok()?;
+    let entry = unsafe { libc::getpwnam(user.as_ptr()) };
+    (!entry.is_null()).then(|| unsafe { ((*entry).pw_uid, (*entry).pw_gid) })
+}
+
+/// Makes the wake socket: /run/shabnam-send (root's, group of the desktop user, 0750) with
+/// wake.sock (0660, same group) in it. None when this is not root's shell or that user is missing.
+pub fn wake_listener() -> Option<std::os::unix::net::UnixListener> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    if unsafe { libc::getuid() } != 0 {
+        return None;
+    }
+    let (_, group) = ids_of(ipc::DESKTOP_USER)?;
+    let own = |path: &str, mode: u32| {
+        let c_path = std::ffi::CString::new(path).ok()?;
+        (unsafe { libc::lchown(c_path.as_ptr(), 0, group) } == 0).then_some(())?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).ok()
+    };
+    let dir = ipc::WAKE_DIR;
+    match std::fs::symlink_metadata(dir) {
+        Ok(meta) if meta.is_dir() && meta.uid() == 0 => {}
+        Ok(_) => return None,
+        Err(_) => std::fs::DirBuilder::new().mode(0o700).create(dir).ok()?,
+    }
+    own(dir, 0o750)?;
+    let path = ipc::wake_path();
+    let _ = std::fs::remove_file(&path);
+    let old_mask = unsafe { libc::umask(0o177) };
+    let bound = std::os::unix::net::UnixListener::bind(&path);
+    unsafe { libc::umask(old_mask) };
+    let listener = bound.ok()?;
+    own(&path, 0o660)?;
+    listener.set_nonblocking(true).ok()?;
+    Some(listener)
+}
+
+/// Whether a connection to the wake socket counts: only the desktop user's (and root's).
+pub fn wake_allowed(stream: &UnixStream) -> bool {
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let got = unsafe {
+        libc::getsockopt(std::os::fd::AsRawFd::as_raw_fd(stream), libc::SOL_SOCKET, libc::SO_PEERCRED, &mut cred as *mut libc::ucred as *mut libc::c_void, &mut len)
+    };
+    got == 0 && len as usize == std::mem::size_of::<libc::ucred>() && (cred.uid == 0 || ids_of(ipc::DESKTOP_USER).is_some_and(|(uid, _)| uid == cred.uid))
 }

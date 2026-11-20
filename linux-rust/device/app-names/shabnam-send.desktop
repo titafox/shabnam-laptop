@@ -9,11 +9,11 @@ Comment=Send this file over Wi-Fi to a LocalSend-compatible device
 Comment[zh_CN]=通过 Wi-Fi 把文件发送到兼容 LocalSend 的设备
 Comment[ru]=Отправить файл по Wi-Fi на устройство, совместимое с LocalSend
 # Offered by the file manager's 「打开方式」 list for a file; not a launcher entry (it needs a file).
-# It runs in a terminal window of its own: shabnam-send lists the devices and asks which one.
-Exec=foot --app-id=shabnam-send --title=隔空传送 -e shabnam-send --hold %F
+# No window of its own: shabnam-send hands the file to the 隔空传送 daemon, and the desktop shell
+# shows the picker (the devices that were found), the progress and the result.
+Exec=shabnam-send %F
 Icon=/usr/share/shabnam/icons/drop.png
 Terminal=false
 NoDisplay=true
-StartupWMClass=shabnam-send
 Categories=Network;FileTransfer;
 MimeType=application/octet-stream;image/png;image/jpeg;image/gif;image/webp;image/svg+xml;image/bmp;application/pdf;text/plain;text/html;audio/mpeg;audio/flac;audio/ogg;audio/x-wav;video/mp4;video/x-matroska;video/webm;application/zip;

@@ -1,5 +1,7 @@
-//! The messages between the receiving daemon (shabnam-dropd, its own user "shabnam-drop") and the desktop shell
+//! The messages between the 隔空传送 daemon (shabnam-dropd, its own user "shabnam-drop") and the desktop shell
 //! (shabnam-shell, root), over a unix socket: one JSON object per line, a fixed set of messages.
+//! And, further down, the messages of the second, narrower socket on which a program of the
+//! desktop's unprivileged user (shabnam-send) hands over files to be sent ("submit").
 //!
 //! This one file is compiled into both programs (the shell includes it by path), so the two
 //! sides cannot drift apart. It needs serde_json and nothing else.
@@ -23,12 +25,37 @@ pub const SOCKET_NAME: &str = "shabnam-drop.sock";
 pub fn socket_path() -> String {
     format!("{RUNTIME_DIR}/{SOCKET_NAME}")
 }
+
+/// The desktop's unprivileged user: the file manager, the browser and every other application
+/// run as it. It is the only user (besides root) that may hand files to the daemon for sending —
+/// and because the browser is among its programs, nothing it says is believed: it can offer
+/// files it could read anyway, never choose where they go.
+pub const DESKTOP_USER: &str = "shabnam";
+/// Where that user reaches the daemon: a directory of the daemon's user with the desktop user's
+/// group and mode 0750 (made by `shabnam-drop start`), holding the socket below.
+pub const SUBMIT_DIR: &str = "/run/shabnam-drop-submit";
+pub const SUBMIT_SOCKET: &str = "submit.sock";
+
+pub fn submit_path() -> String {
+    format!("{SUBMIT_DIR}/{SUBMIT_SOCKET}")
+}
+
+/// The shell's "wake" socket (root's directory, the desktop user's group, mode 0750). A
+/// connection to it — nothing is read from it — asks the shell to start the daemon for sending
+/// when it is not running; the daemon cannot be started by anybody but root.
+pub const WAKE_DIR: &str = "/run/shabnam-send";
+pub const WAKE_SOCKET: &str = "wake.sock";
+
+pub fn wake_path() -> String {
+    format!("{WAKE_DIR}/{WAKE_SOCKET}")
+}
 /// No line is longer than this; a peer that sends more is disconnected.
 pub const MAX_LINE: usize = 8192;
 const MAX_NAME: usize = 120;
 const MAX_TEXT: usize = 600;
 const MAX_ID: usize = 64;
 const MAX_DEVICES: usize = 32;
+const MAX_PIN: usize = 32;
 
 /// Why the daemon turned an offer down by itself.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -54,7 +81,30 @@ impl Refusal {
     }
 }
 
-/// A device that answered on the network (for `shabnam-send`).
+/// What kind of device the other side says it is (shown next to its name, nothing more).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum DeviceKind {
+    Mobile,
+    Desktop,
+    Web,
+    Other,
+}
+
+impl DeviceKind {
+    fn word(self) -> &'static str {
+        match self {
+            DeviceKind::Mobile => "mobile",
+            DeviceKind::Desktop => "desktop",
+            DeviceKind::Web => "web",
+            DeviceKind::Other => "other",
+        }
+    }
+    fn from_word(word: &str) -> DeviceKind {
+        [DeviceKind::Mobile, DeviceKind::Desktop, DeviceKind::Web].into_iter().find(|k| k.word() == word).unwrap_or(DeviceKind::Other)
+    }
+}
+
+/// A device that answered on the network: a possible target for sending.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Device {
     pub alias: String,
@@ -62,9 +112,99 @@ pub struct Device {
     pub host: String,
     pub port: u16,
     pub https: bool,
+    pub kind: DeviceKind,
 }
 
-/// Shell (or `shabnam-send`) to daemon.
+impl Device {
+    fn to_json(&self) -> Value {
+        json!({"alias": self.alias, "fp": self.fingerprint, "host": self.host, "port": self.port, "https": self.https, "kind": self.kind.word()})
+    }
+
+    /// None for a device with a strange host or fingerprint: such a one is never shown or used.
+    fn from_json(d: &Value) -> Option<Device> {
+        let fingerprint = d.get("fp")?.as_str()?;
+        let host = d.get("host")?.as_str()?;
+        (plain(fingerprint, "") && plain(host, ".:%")).then_some(())?;
+        Some(Device {
+            alias: text_of(d, "alias", MAX_NAME)?,
+            fingerprint: fingerprint.to_string(),
+            host: host.to_string(),
+            port: u16::try_from(number(d, "port")?).ok().filter(|p| *p != 0)?,
+            https: d.get("https")?.as_bool()?,
+            kind: DeviceKind::from_word(d.get("kind").and_then(|k| k.as_str()).unwrap_or("")),
+        })
+    }
+}
+
+/// Letters and digits (plus the characters in `extra`), not empty, at most 128 of them.
+fn plain(text: &str, extra: &str) -> bool {
+    !text.is_empty() && text.len() <= 128 && text.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c))
+}
+
+/// A fingerprint in a form a person can compare: the first 16 characters, in groups of four.
+pub fn short_fingerprint(fingerprint: &str) -> String {
+    let head: Vec<char> = fingerprint.chars().filter(char::is_ascii_alphanumeric).take(16).collect();
+    head.chunks(4).map(|group| group.iter().collect::<String>()).collect::<Vec<_>>().join(" ")
+}
+
+/// How a send ended.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SendOutcome {
+    /// Every file arrived.
+    Sent,
+    /// The other side said no.
+    Declined,
+    /// The other side is in another transfer.
+    Busy,
+    /// Stopped on this side (the owner, or the requesting program went away).
+    Cancelled,
+    /// The other side wants a PIN and none (or no right one) could be given.
+    PinNeeded,
+    /// No connection to the device.
+    Unreachable,
+    /// A file could not be read to its announced end.
+    FileChanged,
+    /// The other side never answered the request.
+    NoAnswer,
+    /// `shabnam-send --to`: no such device was found.
+    NoSuchDevice,
+    /// Anything else (it broke off half-way, the other side answered with an error).
+    Failed,
+}
+
+impl SendOutcome {
+    const ALL: [SendOutcome; 10] = [
+        SendOutcome::Sent,
+        SendOutcome::Declined,
+        SendOutcome::Busy,
+        SendOutcome::Cancelled,
+        SendOutcome::PinNeeded,
+        SendOutcome::Unreachable,
+        SendOutcome::FileChanged,
+        SendOutcome::NoAnswer,
+        SendOutcome::NoSuchDevice,
+        SendOutcome::Failed,
+    ];
+    fn word(self) -> &'static str {
+        match self {
+            SendOutcome::Sent => "sent",
+            SendOutcome::Declined => "declined",
+            SendOutcome::Busy => "busy",
+            SendOutcome::Cancelled => "cancelled",
+            SendOutcome::PinNeeded => "pin",
+            SendOutcome::Unreachable => "unreachable",
+            SendOutcome::FileChanged => "file-changed",
+            SendOutcome::NoAnswer => "no-answer",
+            SendOutcome::NoSuchDevice => "no-such-device",
+            SendOutcome::Failed => "failed",
+        }
+    }
+    fn from_word(word: &str) -> Option<SendOutcome> {
+        SendOutcome::ALL.into_iter().find(|o| o.word() == word)
+    }
+}
+
+/// Shell to daemon. Only root's connection is obeyed.
 #[derive(Clone, PartialEq, Debug)]
 pub enum ToDaemon {
     /// The owner's answer to the offer with this id.
@@ -75,16 +215,29 @@ pub enum ToDaemon {
     Cancel { id: String },
     /// Ask for the devices seen on the network.
     Devices,
-    /// Stop receiving: the daemon closes its ports and exits.
+    /// Stop everything: the daemon closes its ports and exits.
     Quit,
+    /// Switch receiving on or off. Off: every offer is declined without asking, and the daemon
+    /// exits once it has nothing left to send.
+    Receive(bool),
+    /// The owner chose, in the shell's picker, where the files of send request `id` go: one of
+    /// the devices the daemon listed for that request, named by all of what was shown.
+    SendTo { id: String, fingerprint: String, host: String, port: u16 },
+    /// The PIN the owner typed for the device that asked for one.
+    SendPin { id: String, pin: String },
+    /// Search the network again for the picker of request `id`.
+    SendRefresh { id: String },
+    /// Give up send request `id`, whatever stage it is in.
+    SendCancel { id: String },
 }
 
 /// Daemon to shell.
 #[derive(Clone, PartialEq, Debug)]
 pub enum FromDaemon {
     /// Sent on connect and whenever something in it changes. `address` is None while the
-    /// Wi-Fi interface has no address (then nothing is listening).
-    State { alias: String, address: Option<String>, quick: bool },
+    /// Wi-Fi interface has no address or nothing needs the network (then nothing is listening).
+    /// `receiving` false: the daemon only runs to send, and declines whatever is offered to it.
+    State { alias: String, address: Option<String>, quick: bool, receiving: bool },
     /// Somebody wants to send files; waits for `Answer`.
     Offer { id: String, from: String, count: u32, bytes: u64, name: String },
     /// The offer is no longer open (the sender gave up, or nobody answered in time).
@@ -97,6 +250,17 @@ pub enum FromDaemon {
     /// A text message (nothing is saved).
     Text { from: String, text: String },
     Devices(Vec<Device>),
+    /// A program of the desktop user handed over files to send: show the picker. Sent again
+    /// (same id) when more files were added to the request while the picker is up.
+    SendRequest { id: String, count: u32, bytes: u64, name: String },
+    /// The devices to choose from for request `id`, while its picker is up.
+    SendDevices { id: String, searching: bool, list: Vec<Device> },
+    /// The chosen device wants a PIN (`wrong`: the one given was not right).
+    SendPinWanted { id: String, wrong: bool },
+    /// `file` 0: waiting for the other side to accept; otherwise the file being sent, of `count`.
+    SendProgress { id: String, to: String, file: u32, count: u32, done: u64, total: u64 },
+    /// The request is over; `sent` files arrived.
+    SendDone { id: String, to: String, outcome: SendOutcome, sent: u32 },
 }
 
 /// Text from the other side, made fit for showing: no control characters, at most `most`
@@ -137,6 +301,11 @@ impl ToDaemon {
             ToDaemon::Cancel { id } => json!({"t": "cancel", "id": id}),
             ToDaemon::Devices => json!({"t": "devices"}),
             ToDaemon::Quit => json!({"t": "quit"}),
+            ToDaemon::Receive(on) => json!({"t": "receive", "on": on}),
+            ToDaemon::SendTo { id, fingerprint, host, port } => json!({"t": "send-to", "id": id, "fp": fingerprint, "host": host, "port": port}),
+            ToDaemon::SendPin { id, pin } => json!({"t": "send-pin", "id": id, "pin": pin}),
+            ToDaemon::SendRefresh { id } => json!({"t": "send-refresh", "id": id}),
+            ToDaemon::SendCancel { id } => json!({"t": "send-cancel", "id": id}),
         };
         format!("{value}\n")
     }
@@ -150,14 +319,36 @@ pub fn parse_to_daemon(line: &str) -> Option<ToDaemon> {
         "cancel" => ToDaemon::Cancel { id: id_of(&value)? },
         "devices" => ToDaemon::Devices,
         "quit" => ToDaemon::Quit,
+        "receive" => ToDaemon::Receive(value.get("on")?.as_bool()?),
+        "send-to" => {
+            let (fingerprint, host) = (value.get("fp")?.as_str()?, value.get("host")?.as_str()?);
+            (plain(fingerprint, "") && plain(host, ".:%")).then_some(())?;
+            ToDaemon::SendTo {
+                id: id_of(&value)?,
+                fingerprint: fingerprint.to_string(),
+                host: host.to_string(),
+                port: u16::try_from(number(&value, "port")?).ok().filter(|p| *p != 0)?,
+            }
+        }
+        "send-pin" => ToDaemon::SendPin { id: id_of(&value)?, pin: pin_of(&value)? },
+        "send-refresh" => ToDaemon::SendRefresh { id: id_of(&value)? },
+        "send-cancel" => ToDaemon::SendCancel { id: id_of(&value)? },
         _ => return None,
     })
+}
+
+/// A PIN as typed: 1 to 32 characters, none of them a control character.
+fn pin_of(value: &Value) -> Option<String> {
+    let pin = value.get("pin")?.as_str()?;
+    (!pin.is_empty() && pin.chars().count() <= MAX_PIN && !pin.chars().any(char::is_control)).then(|| pin.to_string())
 }
 
 impl FromDaemon {
     pub fn encode(&self) -> String {
         let value = match self {
-            FromDaemon::State { alias, address, quick } => json!({"t": "state", "alias": alias, "address": address, "quick": quick}),
+            FromDaemon::State { alias, address, quick, receiving } => {
+                json!({"t": "state", "alias": alias, "address": address, "quick": quick, "receiving": receiving})
+            }
             FromDaemon::Offer { id, from, count, bytes, name } => {
                 json!({"t": "offer", "id": id, "from": from, "count": count, "bytes": bytes, "name": name})
             }
@@ -168,14 +359,16 @@ impl FromDaemon {
             }
             FromDaemon::Refused { from, why } => json!({"t": "refused", "from": from, "why": why.word()}),
             FromDaemon::Text { from, text } => json!({"t": "text", "from": from, "text": text}),
-            FromDaemon::Devices(list) => {
-                let list: Vec<Value> = list
-                    .iter()
-                    .take(MAX_DEVICES)
-                    .map(|d| json!({"alias": d.alias, "fp": d.fingerprint, "host": d.host, "port": d.port, "https": d.https}))
-                    .collect();
-                json!({"t": "devices", "list": list})
+            FromDaemon::Devices(list) => json!({"t": "devices", "list": list.iter().take(MAX_DEVICES).map(Device::to_json).collect::<Vec<_>>()}),
+            FromDaemon::SendRequest { id, count, bytes, name } => json!({"t": "send-request", "id": id, "count": count, "bytes": bytes, "name": name}),
+            FromDaemon::SendDevices { id, searching, list } => {
+                json!({"t": "send-devices", "id": id, "searching": searching, "list": list.iter().take(MAX_DEVICES).map(Device::to_json).collect::<Vec<_>>()})
             }
+            FromDaemon::SendPinWanted { id, wrong } => json!({"t": "send-pin-wanted", "id": id, "wrong": wrong}),
+            FromDaemon::SendProgress { id, to, file, count, done, total } => {
+                json!({"t": "send-progress", "id": id, "to": to, "file": file, "count": count, "done": done, "total": total})
+            }
+            FromDaemon::SendDone { id, to, outcome, sent } => json!({"t": "send-done", "id": id, "to": to, "outcome": outcome.word(), "sent": sent}),
         };
         format!("{value}\n")
     }
@@ -189,6 +382,7 @@ pub fn parse_from_daemon(line: &str) -> Option<FromDaemon> {
             alias: text_of(&value, "alias", MAX_NAME)?,
             address: value.get("address").and_then(|a| a.as_str()).map(|a| tidy(a, 45)).filter(|a| !a.is_empty()),
             quick: value.get("quick")?.as_bool()?,
+            receiving: value.get("receiving")?.as_bool()?,
         },
         "offer" => FromDaemon::Offer {
             id: id_of(&value)?,
@@ -208,27 +402,163 @@ pub fn parse_from_daemon(line: &str) -> Option<FromDaemon> {
         },
         "refused" => FromDaemon::Refused { from: text_of(&value, "from", MAX_NAME)?, why: Refusal::from_word(value.get("why")?.as_str()?)? },
         "text" => FromDaemon::Text { from: text_of(&value, "from", MAX_NAME)?, text: text_of(&value, "text", MAX_TEXT)? },
-        "devices" => FromDaemon::Devices(
-            value
-                .get("list")?
-                .as_array()?
-                .iter()
-                .take(MAX_DEVICES)
-                .filter_map(|d| {
-                    let fingerprint = d.get("fp")?.as_str()?;
-                    let host = d.get("host")?.as_str()?;
-                    let plain = |text: &str, extra: &str| !text.is_empty() && text.len() <= 128 && text.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c));
-                    (plain(fingerprint, "") && plain(host, ".:%")).then_some(())?;
-                    Some(Device {
-                        alias: text_of(d, "alias", MAX_NAME)?,
-                        fingerprint: fingerprint.to_string(),
-                        host: host.to_string(),
-                        port: u16::try_from(number(d, "port")?).ok().filter(|p| *p != 0)?,
-                        https: d.get("https")?.as_bool()?,
-                    })
-                })
-                .collect(),
-        ),
+        "devices" => FromDaemon::Devices(devices_of(&value)?),
+        "send-request" => FromDaemon::SendRequest { id: id_of(&value)?, count: count("count")?, bytes: number(&value, "bytes")?, name: text_of(&value, "name", MAX_NAME)? },
+        "send-devices" => FromDaemon::SendDevices { id: id_of(&value)?, searching: value.get("searching")?.as_bool()?, list: devices_of(&value)? },
+        "send-pin-wanted" => FromDaemon::SendPinWanted { id: id_of(&value)?, wrong: value.get("wrong")?.as_bool()? },
+        "send-progress" => FromDaemon::SendProgress {
+            id: id_of(&value)?,
+            to: text_of(&value, "to", MAX_NAME)?,
+            file: count("file")?,
+            count: count("count")?,
+            done: number(&value, "done")?,
+            total: number(&value, "total")?,
+        },
+        "send-done" => FromDaemon::SendDone {
+            id: id_of(&value)?,
+            to: text_of(&value, "to", MAX_NAME)?,
+            outcome: SendOutcome::from_word(value.get("outcome")?.as_str()?)?,
+            sent: count("sent")?,
+        },
+        _ => return None,
+    })
+}
+
+/// The "list" of a message: at most `MAX_DEVICES`, the odd ones left out.
+fn devices_of(value: &Value) -> Option<Vec<Device>> {
+    Some(value.get("list")?.as_array()?.iter().take(MAX_DEVICES).filter_map(Device::from_json).collect())
+}
+
+// ---------- the submit socket: a program of the desktop user hands over files to send ----------
+//
+// One line per message as above. The requester sends `File` with exactly one open descriptor
+// attached (SCM_RIGHTS, see fdpass.rs) and waits for `Ok` before the next; then `Go`. What is
+// sent is read from those descriptors — opened by the requester with its own rights — and never
+// looked up by name; the name is only what the other device is told (rewritten by names.rs).
+
+/// Why the daemon does not take a submission.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SubmitRefusal {
+    /// Something is being sent or received already.
+    Busy,
+    /// More files than the limit for one transfer.
+    TooMany,
+    /// More bytes than the limit for one transfer.
+    TooBig,
+    /// What was handed over is not an open, readable, regular file.
+    NotAFile,
+    /// Only root may name the target itself (`--to`).
+    NotAllowed,
+    /// Nobody could be asked where to send: the desktop shell is not connected.
+    NoScreen,
+    /// Not a message of this protocol, or out of order.
+    Bad,
+}
+
+impl SubmitRefusal {
+    const ALL: [SubmitRefusal; 7] = [
+        SubmitRefusal::Busy,
+        SubmitRefusal::TooMany,
+        SubmitRefusal::TooBig,
+        SubmitRefusal::NotAFile,
+        SubmitRefusal::NotAllowed,
+        SubmitRefusal::NoScreen,
+        SubmitRefusal::Bad,
+    ];
+    fn word(self) -> &'static str {
+        match self {
+            SubmitRefusal::Busy => "busy",
+            SubmitRefusal::TooMany => "too-many",
+            SubmitRefusal::TooBig => "too-big",
+            SubmitRefusal::NotAFile => "not-a-file",
+            SubmitRefusal::NotAllowed => "not-allowed",
+            SubmitRefusal::NoScreen => "no-screen",
+            SubmitRefusal::Bad => "bad",
+        }
+    }
+}
+
+/// Requester to daemon.
+#[derive(Clone, PartialEq, Debug)]
+pub enum ToSubmit {
+    /// One file: its name for the other side. The open file comes attached to this message.
+    File { name: String },
+    /// That was all. `to` (root's connection only): send to the device with this name or
+    /// address instead of asking on the screen — after `Confirm`.
+    Go { to: Option<String> },
+    /// Root's connection only: yes, send to the `Target` just reported.
+    Confirm,
+}
+
+/// Daemon to requester.
+#[derive(Clone, PartialEq, Debug)]
+pub enum FromSubmit {
+    /// The file was taken; send the next.
+    Ok,
+    Refused(SubmitRefusal),
+    /// The request waits for the owner to choose a device on the screen.
+    Queued,
+    /// Answer to `Go { to }`: the device that was found; waits for `Confirm`.
+    Target(Device),
+    Progress { done: u64, total: u64 },
+    Result { outcome: SendOutcome, sent: u32, to: String },
+}
+
+impl ToSubmit {
+    pub fn encode(&self) -> String {
+        let value = match self {
+            ToSubmit::File { name } => json!({"t": "file", "name": name}),
+            ToSubmit::Go { to } => json!({"t": "go", "to": to}),
+            ToSubmit::Confirm => json!({"t": "confirm"}),
+        };
+        format!("{value}\n")
+    }
+}
+
+/// A file name as the requester gave it: any text up to 1000 characters (it is rewritten into a
+/// harmless name before use), but text it must be.
+pub fn parse_to_submit(line: &str) -> Option<ToSubmit> {
+    let (value, kind) = object(line)?;
+    Some(match kind.as_str() {
+        "file" => ToSubmit::File { name: value.get("name")?.as_str()?.chars().take(1000).collect() },
+        "go" => ToSubmit::Go {
+            to: match value.get("to") {
+                None | Some(Value::Null) => None,
+                Some(to) => Some(tidy(to.as_str()?, MAX_NAME)).filter(|to| !to.is_empty()),
+            },
+        },
+        "confirm" => ToSubmit::Confirm,
+        _ => return None,
+    })
+}
+
+impl FromSubmit {
+    pub fn encode(&self) -> String {
+        let value = match self {
+            FromSubmit::Ok => json!({"t": "ok"}),
+            FromSubmit::Refused(why) => json!({"t": "refused", "why": why.word()}),
+            FromSubmit::Queued => json!({"t": "queued"}),
+            FromSubmit::Target(device) => json!({"t": "target", "device": device.to_json()}),
+            FromSubmit::Progress { done, total } => json!({"t": "progress", "done": done, "total": total}),
+            FromSubmit::Result { outcome, sent, to } => json!({"t": "result", "outcome": outcome.word(), "sent": sent, "to": to}),
+        };
+        format!("{value}\n")
+    }
+}
+
+pub fn parse_from_submit(line: &str) -> Option<FromSubmit> {
+    let (value, kind) = object(line)?;
+    Some(match kind.as_str() {
+        "ok" => FromSubmit::Ok,
+        "refused" => FromSubmit::Refused(SubmitRefusal::ALL.into_iter().find(|r| Some(r.word()) == value.get("why").and_then(|w| w.as_str()))?),
+        "queued" => FromSubmit::Queued,
+        "target" => FromSubmit::Target(Device::from_json(value.get("device")?)?),
+        "progress" => FromSubmit::Progress { done: number(&value, "done")?, total: number(&value, "total")? },
+        "result" => FromSubmit::Result {
+            outcome: SendOutcome::from_word(value.get("outcome")?.as_str()?)?,
+            sent: number(&value, "sent")?.min(u32::MAX as u64) as u32,
+            to: text_of(&value, "to", MAX_NAME)?,
+        },
         _ => return None,
     })
 }
@@ -271,6 +601,11 @@ mod tests {
             ToDaemon::Cancel { id: "abc".into() },
             ToDaemon::Devices,
             ToDaemon::Quit,
+            ToDaemon::Receive(true),
+            ToDaemon::SendTo { id: "o-1".into(), fingerprint: "AB12".into(), host: "192.0.2.5".into(), port: 53317 },
+            ToDaemon::SendPin { id: "o-1".into(), pin: "123456".into() },
+            ToDaemon::SendRefresh { id: "o-1".into() },
+            ToDaemon::SendCancel { id: "o-1".into() },
         ];
         for message in to {
             let line = message.encode();
@@ -278,19 +613,88 @@ mod tests {
             assert_eq!(parse_to_daemon(&line), Some(message));
         }
         let from = [
-            FromDaemon::State { alias: "水滴".into(), address: Some("192.0.2.33".into()), quick: false },
-            FromDaemon::State { alias: "Shabnam".into(), address: None, quick: true },
+            FromDaemon::State { alias: "水滴".into(), address: Some("192.0.2.33".into()), quick: false, receiving: true },
+            FromDaemon::State { alias: "Shabnam".into(), address: None, quick: true, receiving: false },
             FromDaemon::Offer { id: "s1".into(), from: "小米 14".into(), count: 3, bytes: 12_400_000, name: "照片 1.jpg".into() },
             FromDaemon::OfferGone { id: "s1".into() },
             FromDaemon::Progress { id: "s1".into(), done: 5, total: 10 },
             FromDaemon::Done { id: "s1".into(), from: "Mac".into(), saved: 2, failed: 1, name: "a (2).txt".into() },
             FromDaemon::Refused { from: "x".into(), why: Refusal::NoSpace },
             FromDaemon::Text { from: "Phone".into(), text: "你好 \"quoted\"".into() },
-            FromDaemon::Devices(vec![Device { alias: "iPhone".into(), fingerprint: "AB12".into(), host: "192.0.2.5".into(), port: 53317, https: true }]),
+            FromDaemon::Devices(vec![phone()]),
+            FromDaemon::SendRequest { id: "o-1".into(), count: 2, bytes: 3_000_000, name: "照片 1.jpg".into() },
+            FromDaemon::SendDevices { id: "o-1".into(), searching: true, list: vec![phone(), Device { https: false, kind: DeviceKind::Other, ..phone() }] },
+            FromDaemon::SendPinWanted { id: "o-1".into(), wrong: true },
+            FromDaemon::SendProgress { id: "o-1".into(), to: "iPhone".into(), file: 1, count: 2, done: 5, total: 10 },
         ];
         for message in from {
             assert_eq!(parse_from_daemon(&message.encode()), Some(message));
         }
+        for outcome in SendOutcome::ALL {
+            let message = FromDaemon::SendDone { id: "o-1".into(), to: "iPhone".into(), outcome, sent: 1 };
+            assert_eq!(parse_from_daemon(&message.encode()), Some(message));
+        }
+    }
+
+    fn phone() -> Device {
+        Device { alias: "iPhone".into(), fingerprint: "AB12".into(), host: "192.0.2.5".into(), port: 53317, https: true, kind: DeviceKind::Mobile }
+    }
+
+    #[test]
+    fn submit_messages_round_trip() {
+        for message in [ToSubmit::File { name: "照片 \"1\".jpg".into() }, ToSubmit::Go { to: None }, ToSubmit::Go { to: Some("Mac".into()) }, ToSubmit::Confirm] {
+            let line = message.encode();
+            assert!(line.ends_with('\n') && line.matches('\n').count() == 1);
+            assert_eq!(parse_to_submit(&line), Some(message));
+        }
+        let mut from = vec![FromSubmit::Ok, FromSubmit::Queued, FromSubmit::Target(phone()), FromSubmit::Progress { done: 1, total: 2 }];
+        from.extend(SubmitRefusal::ALL.map(FromSubmit::Refused));
+        from.extend(SendOutcome::ALL.map(|outcome| FromSubmit::Result { outcome, sent: 3, to: "Mac".into() }));
+        for message in from {
+            assert_eq!(parse_from_submit(&message.encode()), Some(message));
+        }
+    }
+
+    #[test]
+    fn a_requester_cannot_say_more_than_the_protocol_allows() {
+        // No message of the submit socket names a target, except root's `to` (which the daemon
+        // refuses from anybody else); the shell's messages are not understood there at all.
+        for line in [
+            r#"{"t":"send-to","id":"o-1","fp":"AB12","host":"192.0.2.5","port":53317}"#,
+            r#"{"t":"answer","id":"s1","accept":true}"#,
+            r#"{"t":"receive","on":true}"#,
+            r#"{"t":"quit"}"#,
+            r#"{"t":"file"}"#,
+            r#"{"t":"file","name":7}"#,
+            r#"{"t":"go","to":7}"#,
+        ] {
+            assert_eq!(parse_to_submit(line), None, "{line}");
+        }
+        // An empty or blank target is no target; control characters never get through.
+        assert_eq!(parse_to_submit(r#"{"t":"go","to":"  "}"#), Some(ToSubmit::Go { to: None }));
+        assert_eq!(parse_to_submit(r#"{"t":"go"}"#), Some(ToSubmit::Go { to: None }));
+        assert_eq!(parse_to_submit("{\"t\":\"go\",\"to\":\"Mac\\u001b[31m\"}"), Some(ToSubmit::Go { to: Some("Mac[31m".into()) }));
+        let Some(ToSubmit::File { name }) = parse_to_submit(&ToSubmit::File { name: "x".repeat(3000) }.encode()) else { panic!() };
+        assert_eq!(name.len(), 1000);
+        // The shell's side: a target must look like one, a PIN like a PIN.
+        for line in [
+            r#"{"t":"send-to","id":"o-1","fp":"AB 12","host":"192.0.2.5","port":53317}"#,
+            r#"{"t":"send-to","id":"o-1","fp":"AB12","host":"192.0.2.5/x","port":53317}"#,
+            r#"{"t":"send-to","id":"o-1","fp":"AB12","host":"192.0.2.5","port":0}"#,
+            r#"{"t":"send-to","id":"o-1","fp":"AB12","host":"192.0.2.5","port":70000}"#,
+            r#"{"t":"send-to","id":"../x","fp":"AB12","host":"192.0.2.5","port":1}"#,
+            r#"{"t":"send-pin","id":"o-1","pin":""}"#,
+            r#"{"t":"send-pin","id":"o-1","pin":"1\n2"}"#,
+            r#"{"t":"send-pin","id":"o-1","pin":"123456789012345678901234567890123"}"#,
+            r#"{"t":"receive","on":"yes"}"#,
+            r#"{"t":"send-cancel"}"#,
+        ] {
+            assert_eq!(parse_to_daemon(line), None, "{line}");
+        }
+        assert_eq!(parse_from_daemon(r#"{"t":"send-done","id":"o-1","to":"x","outcome":"great","sent":1}"#), None);
+        assert_eq!(parse_from_daemon(r#"{"t":"state","alias":"x","address":null,"quick":false}"#), None, "a state without `receiving`");
+        assert_eq!(short_fingerprint("AB12CD34EF56AB78FFFF0000"), "AB12 CD34 EF56 AB78");
+        assert_eq!(short_fingerprint("ab:12"), "ab12");
     }
 
     #[test]

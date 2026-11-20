@@ -281,6 +281,41 @@ messages! {
     DropStartFailed: "无法开启隔空传送", "Не удалось включить приём", "Could not start receiving";
     DropStartFailedWhy: "接收程序没有启动", "Программа приёма не запустилась", "The receiver did not start";
     DropFrom: "来自「{}」", "от «{}»", "from “{}”";
+    // ----- 隔空传送: sending (the picker, progress, result) -----
+    SendChoose: "选择接收设备", "Выберите устройство", "Choose a device";
+    SendSearching: "正在查找附近的设备…", "Поиск устройств поблизости…", "Looking for nearby devices…";
+    SendEmpty: "没有找到设备。请在对方设备上打开 LocalSend，并连接到同一个 Wi-Fi。", "Устройства не найдены. Откройте LocalSend на другом устройстве и подключите его к той же сети Wi-Fi.", "No devices found. Open LocalSend on the other device and connect it to the same Wi-Fi.";
+    SendNoWifi: "Wi-Fi 未连接，无法发送。请先连接 Wi-Fi。", "Wi-Fi не подключён, отправить нельзя. Сначала подключитесь к сети.", "Wi-Fi is not connected, so nothing can be sent. Connect to Wi-Fi first.";
+    SendRefresh: "重新查找", "Искать снова", "Search again";
+    SendKnown: "已发送过", "Уже отправляли", "Sent before";
+    SendUnencrypted: "未加密，无法确认对方身份", "Без шифрования: устройство нельзя проверить", "Not encrypted: the device cannot be verified";
+    SendPlain: "未加密", "без шифрования", "not encrypted";
+    SendToTitle: "发送到「{}」？", "Отправить на «{}»?", "Send to “{}”?";
+    SendFingerprint: "证书指纹 {}", "Отпечаток сертификата: {}", "Certificate fingerprint {}";
+    SendFirstTime: "还没有向这台设备发送过。请核对名称、地址和指纹，确认是你要发送的设备。", "На это устройство вы ещё не отправляли. Сверьте имя, адрес и отпечаток: это должно быть нужное устройство.", "You have not sent to this device before. Check its name, address and fingerprint: it should be the device you mean.";
+    SendBack: "返回", "Назад", "Back";
+    SendGo: "发送", "Отправить", "Send";
+    SendPinTitle: "「{}」需要 PIN 码", "«{}» требует PIN-код", "“{}” asks for a PIN";
+    SendPinField: "PIN 码", "PIN-код", "PIN";
+    SendPinHint: "输入对方设备上设置的 PIN 码，然后按回车", "Введите PIN-код, заданный на том устройстве, и нажмите Enter", "Type the PIN set on that device, then Enter";
+    SendPinWrong: "PIN 码不正确，请重试", "Неверный PIN-код, попробуйте ещё раз", "Wrong PIN, try again";
+    SendWaiting: "等待「{}」接受…", "Ожидание ответа от «{}»…", "Waiting for “{}” to accept…";
+    SendWaitingSub: "请在对方设备上点接受", "Подтвердите приём на том устройстве", "Accept it on the other device";
+    SendSending: "正在发送到「{}」", "Отправка на «{}»", "Sending to “{}”";
+    SendSentTo: "已送达「{}」", "Получатель: «{}»", "Delivered to “{}”";
+    SendDeclined: "「{}」拒绝了传送", "«{}»: передача отклонена", "“{}” declined the transfer";
+    SendBusy: "「{}」正忙，请稍后再试", "«{}» сейчас занято, попробуйте позже", "“{}” is busy, try again later";
+    SendFailed: "未能发送到「{}」", "Не удалось отправить на «{}»", "Could not send to “{}”";
+    SendNothingSent: "没有发送任何文件", "Ничего не отправлено", "Nothing was sent";
+    SendWhyUnreachable: "无法连接到对方设备", "Не удалось подключиться к устройству", "Could not connect to the device";
+    SendWhyFile: "读取文件时出错", "Ошибка чтения файла", "A file could not be read";
+    SendWhyNoAnswer: "对方没有回应", "Устройство не ответило", "The device did not answer";
+    SendWhyInterrupted: "传送中断", "Передача прервана", "The transfer was interrupted";
+    SendWhyPin: "PIN 码未通过验证", "PIN-код не принят", "The PIN was not accepted";
+    KindPhone: "手机", "Телефон", "Phone";
+    KindComputer: "电脑", "Компьютер", "Computer";
+    KindBrowser: "浏览器", "Браузер", "Browser";
+    KindDevice: "设备", "Устройство", "Device";
 }
 
 counted! {
@@ -296,6 +331,18 @@ counted! {
     DropFailed: "{n} 个未完成",
         ["{n} файл не получен", "{n} файла не получено", "{n} файлов не получено"],
         ["{n} not completed", "{n} not completed"];
+    SendFiles: "发送 {n} 个文件",
+        ["Отправить {n} файл", "Отправить {n} файла", "Отправить {n} файлов"],
+        ["Send {n} file", "Send {n} files"];
+    SendSent: "已发送 {n} 个文件",
+        ["Отправлен {n} файл", "Отправлено {n} файла", "Отправлено {n} файлов"],
+        ["{n} file sent", "{n} files sent"];
+    SendSentPart: "中断前已发送 {n} 个文件",
+        ["До сбоя отправлен {n} файл", "До сбоя отправлено {n} файла", "До сбоя отправлено {n} файлов"],
+        ["{n} file was sent before that", "{n} files were sent before that"];
+    SendFileOf: "第 {n} 个，共 {} 个",
+        ["Файл {n} из {}", "Файл {n} из {}", "Файл {n} из {}"],
+        ["File {n} of {}", "File {n} of {}"];
 }
 
 /// The date line of the quick panel: "11月20日 周五", "Пт, 20 ноября", "Fri, 20 Nov".
@@ -409,6 +456,15 @@ mod tests {
         assert_eq!(Count::CloseWindows.text(Lang::Ru, 2, &[]), "Закрыть 2 окна");
         assert_eq!(Count::CloseWindows.text(Lang::Ru, 12, &[]), "Закрыть 12 окон");
         assert_eq!(Count::DropFailed.text(Lang::Ru, 1, &[]), "1 файл не получен");
+        assert_eq!(Count::SendFiles.text(Lang::Ru, 1, &[]), "Отправить 1 файл");
+        assert_eq!(Count::SendFiles.text(Lang::Ru, 3, &[]), "Отправить 3 файла");
+        assert_eq!(Count::SendFiles.text(Lang::Ru, 12, &[]), "Отправить 12 файлов");
+        assert_eq!(Count::SendSent.text(Lang::Ru, 1, &[]), "Отправлен 1 файл");
+        assert_eq!(Count::SendSent.text(Lang::Ru, 22, &[]), "Отправлено 22 файла");
+        assert_eq!(Count::SendSent.text(Lang::Ru, 5, &[]), "Отправлено 5 файлов");
+        assert_eq!(Count::SendFileOf.text(Lang::Ru, 2, &["3"]), "Файл 2 из 3");
+        assert_eq!(Count::SendFileOf.text(Lang::Zh, 2, &["3"]), "第 2 个，共 3 个");
+        assert_eq!(Count::SendFileOf.text(Lang::En, 2, &["3"]), "File 2 of 3");
     }
 
     #[test]

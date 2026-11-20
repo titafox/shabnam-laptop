@@ -1,7 +1,7 @@
 //! The rules the receiver applies before anything touches the disk, kept free of I/O so they
 //! can be tested: who may send, how much, and what happens to an offer.
 
-use crate::ipc::Refusal;
+use crate::ipc::{Refusal, SubmitRefusal};
 use std::net::{IpAddr, Ipv4Addr};
 
 /// Most files in one transfer.
@@ -37,6 +37,38 @@ pub fn check_size(files: usize, bytes: u64, free: u64) -> Result<(), Refusal> {
     } else {
         Ok(())
     }
+}
+
+/// The same limits for what leaves: number of files and bytes of one send request.
+pub fn check_send(files: usize, bytes: u64) -> Result<(), SubmitRefusal> {
+    if files > MAX_FILES {
+        Err(SubmitRefusal::TooMany)
+    } else if bytes > MAX_TOTAL {
+        Err(SubmitRefusal::TooBig)
+    } else {
+        Ok(())
+    }
+}
+
+/// How long a send request waits for the owner (to choose a device, to type a PIN) and for
+/// the other side's answer before it is given up.
+pub const SEND_WAIT_SECONDS: u64 = 300;
+/// How long a daemon that is only there for sending stays when nobody asks it for anything.
+pub const SEND_IDLE_SECONDS: u64 = 20;
+/// Most programs that may be handing over files at the same time (the file manager starts one
+/// per selected file).
+pub const MAX_SUBMITTERS: usize = 64;
+
+/// Whether an offer from the network may be considered at all: only while receiving is switched
+/// on, and not while this device is itself sending. "Off" means nobody can send to us — also
+/// during the moments the port is open because the owner is looking for a device to send to.
+pub fn offers_welcome(receiving: bool, sending: bool) -> bool {
+    receiving && !sending
+}
+
+/// Whether the network side (port and discovery) has to be up.
+pub fn network_wanted(receiving: bool, sending: bool) -> bool {
+    receiving || sending
 }
 
 /// Most files of one transfer that may arrive at the same time.
@@ -195,6 +227,27 @@ mod tests {
         assert_eq!(check_size(1, 5 << 30, 5 << 30), Err(Refusal::NoSpace));
         assert_eq!(check_size(1, u64::MAX, u64::MAX), Err(Refusal::TooBig));
         assert_eq!(check_size(1, 1, RESERVE), Err(Refusal::NoSpace));
+    }
+
+    #[test]
+    fn sending_has_the_same_limits() {
+        assert_eq!(check_send(1, 0), Ok(()));
+        assert_eq!(check_send(MAX_FILES, MAX_TOTAL), Ok(()));
+        assert_eq!(check_send(MAX_FILES + 1, 1), Err(SubmitRefusal::TooMany));
+        assert_eq!(check_send(1, MAX_TOTAL + 1), Err(SubmitRefusal::TooBig));
+        assert_eq!(check_send(1, u64::MAX), Err(SubmitRefusal::TooBig));
+    }
+
+    #[test]
+    fn off_means_nobody_can_send_to_us() {
+        // Receiving off: never, whether or not the port is open for a search.
+        assert!(!offers_welcome(false, false));
+        assert!(!offers_welcome(false, true));
+        // Receiving on: yes, except while this device is sending.
+        assert!(offers_welcome(true, false));
+        assert!(!offers_welcome(true, true));
+        assert!(!network_wanted(false, false), "nothing listens when there is nothing to do");
+        assert!(network_wanted(false, true) && network_wanted(true, false));
     }
 
     #[test]

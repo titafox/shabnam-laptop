@@ -14,6 +14,14 @@
 #   the CPU. Painting on this GPU driver leaves the page blank on roughly every second start.
 # --num-raster-threads=4: that CPU painting uses all four cores instead of the default two; a full-window
 #   repaint measured 13.3 frames a second instead of 11.8.
+# mali-finish (GL_FIX below): a small stand-in libEGL.so.1 that makes the graphics chip finish each window
+#   picture before the desktop is given it. Without it the browser flickers: during scrolling, animations
+#   and page changes, single frames show blocks of old and new content, because this Mali driver and kernel
+#   give Chromium nothing to wait on. Measured with flicker-test/ (broken frames per screenshots taken):
+#   8 of 156 without, 0 of 114 with, at about 39 instead of 44 frames a second. No Chromium flag and no
+#   niri option removed it; software compositing (--disable-gpu) did, but at 10 frames a second and it
+#   would rule out hardware video decoding. Source and details: mali-finish/mali-finish.c.
+#   SHABNAM_GL_FINISH=0 shabnam-browser  starts a browser without the fix, to see the difference.
 umask 022   # the desktop's root shell runs with umask 0; the browser's files must not be world-writable
 BROWSER_USER=shabnam
 MALI_LIBS=/opt/mali/mali:/opt/mali:/opt/mpp2/usr/lib/aarch64-linux-gnu
@@ -45,17 +53,23 @@ if [ "$(id -u)" = 0 ]; then
       PULSE_SERVER="$pulse" \
       LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MALI_LIBS}" \
       SHABNAM_BROWSER_FLAGS="$SHABNAM_BROWSER_FLAGS" \
+      ${SHABNAM_GL_FINISH:+SHABNAM_GL_FINISH="$SHABNAM_GL_FINISH"} \
       "$0" "$@"
 fi
 
 # Ties the window to shabnam-browser.desktop (Wayland app-id "shabnam-browser").
 export CHROME_DESKTOP=shabnam-browser.desktop
+# Chromium has no Google API keys; this silences the bar it shows about that at every start.
+export GOOGLE_API_KEY=no GOOGLE_DEFAULT_CLIENT_ID=no GOOGLE_DEFAULT_CLIENT_SECRET=no
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MALI_LIBS}"
+# The flicker fix: Chromium's graphics process finds this libEGL.so.1 before the driver's own.
+GL_FIX=/usr/local/lib/shabnam-browser-gl
+case :$LD_LIBRARY_PATH: in *:$GL_FIX:*) ;; *) [ -r $GL_FIX/libEGL.so.1 ] && LD_LIBRARY_PATH=$GL_FIX:$LD_LIBRARY_PATH ;; esac
 exec /usr/lib/chromium/chromium \
   --ozone-platform=wayland \
   --no-sandbox \
   --disable-gpu-rasterization \
-  --num-raster-threads=4 \
+  --disable-features=WaylandOverlayDelegation \
   --enable-wayland-ime --wayland-text-input-version=3 \
   --password-store=basic \
   --no-first-run --no-default-browser-check \

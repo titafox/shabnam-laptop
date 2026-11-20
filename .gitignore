@@ -38,3 +38,4 @@ target/
 *.bgra
 *.new
 linux-rust/mac/subscreen-tx/subscreen-tx
+linux-rust/device/mali-finish/libEGL.so.1

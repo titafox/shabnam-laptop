@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><title>F0 0</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#fff}
+#s{position:absolute;left:0;top:0;width:100%;will-change:transform;animation:scroll 2.3s ease-in-out infinite alternate}
+#s div{height:40px;width:100%}
+@keyframes scroll{from{transform:translateY(0)}to{transform:translateY(-1800px)}}
+#f{position:fixed;left:0;top:0;width:100%;height:100%;background:#000;will-change:opacity;animation:fade 1.3s linear infinite alternate}
+@keyframes fade{from{opacity:0}to{opacity:.4}}
+</style></head><body><div id="s"></div><div id="f"></div>
+<script>
+// Regression page for the browser flicker test: every pixel row must be one colour across the whole
+// width, and stripe edges must be 40 CSS px apart, at any instant. See README in this directory.
+var BASE=180, OTHER="a.html", N=60, phase=0, s=document.getElementById('s'), d=[];
+function col(k){return 'hsl('+((BASE+k*47)%360)+',80%,'+(k%2?42:58)+'%)';}
+for(var i=0;i<N;i++){var e=document.createElement('div');e.style.background=col(i);s.appendChild(e);d.push(e);}
+var h=location.hash.slice(1).split(','), n0=+h[0]||0, t0=+h[1]||0, n=0;
+document.title='F'+n0+' '+Math.round(t0);
+function tick(){n++; if(n%10==0) document.title='F'+(n0+n)+' '+Math.round(t0+performance.now()); requestAnimationFrame(tick);}
+requestAnimationFrame(tick);
+// repaint: every stripe takes its neighbour's colour (old and new content differ in every row)
+setInterval(function(){phase++; for(var i=0;i<N;i++) d[i].style.background=col(i+phase);},700);
+// page transition
+setTimeout(function(){location.replace(OTHER+'#'+(n0+n)+','+Math.round(t0+performance.now()));},3500);
+</script></body></html>

@@ -1,0 +1,16 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Videos
+Name[en]=Videos
+Name[zh_CN]=视频
+GenericName=Video Player
+GenericName[zh_CN]=视频播放器
+Comment=Play video files and online videos
+Comment[zh_CN]=播放本地视频和网络视频
+Exec=shabnam-player %U
+Icon=/usr/share/shabnam/icons/videos.png
+Terminal=false
+StartupWMClass=shabnam-player
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/mpeg;video/mp2t;video/x-flv;video/3gpp;video/ogg;video/x-m4v;application/vnd.apple.mpegurl;application/x-mpegURL;application/dash+xml;

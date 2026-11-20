@@ -1,0 +1,98 @@
+#!/bin/sh
+# shabnam-player [FILE | URL] — the Shabnam video player.
+#
+#   shabnam-player film.mp4                 a file
+#   shabnam-player https://host/clip.mp4    a direct link (mp4, mkv, webm, m3u8, mpd …)
+#   shabnam-player https://site/watch?v=…   a page: yt-dlp finds the stream (H.264, at most 1080p) and its sound
+#   shabnam-player                          pick a file in the file manager first
+#
+# The picture is decoded by the RK3568's hardware decoder (GStreamer element mppvideodec, from
+# libgstrockchipmpp.so) and shown without copying by shabnam-video; see linux-rust/shabnam-video/main.c for
+# the keys. SHABNAM_PLAYER_FLAGS="--sw" forces the software decoder, "--stats" prints frame counts.
+#
+# Who it runs as: the desktop runs as root, a program that parses files from the network must not. Like
+# shabnam-browser, this script lets the unprivileged user "shabnam" (uid 700) reach the compositor's and the
+# sound server's sockets — nothing else — and drops to that user. The decoder device /dev/mpp_service is
+# open to everyone already. A local file is opened here, by the caller, and handed over as an open file
+# descriptor, so files the user "shabnam" could not read by itself (anything under /root) still play.
+umask 022
+PLAYER_USER=shabnam
+MPP_LIBS=/opt/mpp2/usr/lib/aarch64-linux-gnu
+# Streams the hardware decoder plays; a page's video is picked in this order.
+FORMAT='bv*[vcodec^=avc1][height<=1080]+ba[acodec^=mp4a]/bv*[vcodec^=avc1][height<=1080]+ba/b[vcodec^=avc1][height<=1080]/b[height<=1080]/b'
+
+socket=${WAYLAND_DISPLAY:-wayland-1}
+case $socket in /*) ;; *) socket=${XDG_RUNTIME_DIR:-/run/user0}/$socket ;; esac
+
+if [ "$(id -u)" = 0 ]; then
+  target=$1
+  title=
+  if [ -z "$target" ]; then
+    # No file given (started from the launcher): choose one in the file manager.
+    pick=$(mktemp /run/shabnam-player-pick.XXXXXX) || exit 1
+    dir=${HOME:-/root}; [ -d "$dir/Videos" ] && dir=$dir/Videos
+    foot --app-id=shabnam-player-open --title='选择视频 · Videos' yazi --chooser-file="$pick" "$dir"
+    target=$(head -n 1 "$pick"); rm -f "$pick"
+    [ -n "$target" ] || exit 0
+  fi
+  case $target in
+    *://*) ;;
+    *)
+      [ -f "$target" ] || { echo "shabnam-player: no such file: $target" >&2; exit 1; }
+      exec 3<"$target" || exit 1
+      title=$(basename "$target"); target=fd://3 ;;
+  esac
+  uid=$(id -u "$PLAYER_USER") || { echo "shabnam-player: user $PLAYER_USER is missing" >&2; exit 1; }
+  # The same two hard links shabnam-browser makes; see there for why they are safe.
+  share=/run/shabnam-share
+  mkdir -p "$share" && chown root:"$PLAYER_USER" "$share" && chmod 750 "$share" &&
+    chgrp "$PLAYER_USER" "$socket" && chmod 660 "$socket" && ln -f "$socket" "$share/wayland-0" ||
+    { echo "shabnam-player: cannot share $socket with $PLAYER_USER" >&2; exit 1; }
+  socket=$share/wayland-0
+  pulse=${XDG_RUNTIME_DIR:-/run/user0}/pulse/native
+  if [ -S "$pulse" ] && chgrp "$PLAYER_USER" "$pulse" && chmod 660 "$pulse" && ln -f "$pulse" "$share/pulse-native"
+  then pulse=unix:$share/pulse-native; else pulse=; fi
+  runtime=/run/user/$uid
+  mkdir -p "$runtime" && chown "$PLAYER_USER:$PLAYER_USER" "$runtime" && chmod 700 "$runtime"
+  home=$(getent passwd "$PLAYER_USER" | cut -d: -f6)
+  cd "$home" || exit 1
+  exec setpriv --reuid "$PLAYER_USER" --regid "$PLAYER_USER" --init-groups \
+    env -i HOME="$home" USER="$PLAYER_USER" LOGNAME="$PLAYER_USER" SHELL=/bin/sh \
+      PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-zh_CN.UTF-8}" ${TZ:+TZ="$TZ"} \
+      XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY="$socket" \
+      PULSE_SERVER="$pulse" \
+      LD_LIBRARY_PATH="$MPP_LIBS" \
+      SHABNAM_PLAYER_FLAGS="$SHABNAM_PLAYER_FLAGS" SHABNAM_PLAYER_TITLE="$title" \
+      "$0" "$target"
+fi
+
+target=$1
+[ -n "$target" ] || { echo "usage: shabnam-player FILE-or-URL" >&2; exit 2; }
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-$MPP_LIBS}"
+title=$SHABNAM_PLAYER_TITLE
+
+case $target in
+  http://*|https://*)
+    path=${target%%[?#]*}
+    case $path in
+      *.mp4|*.m4v|*.mov|*.mkv|*.webm|*.ts|*.flv|*.avi|*.m3u8|*.mpd|*.MP4|*.MKV) ;;   # a direct link
+      *)
+        # A page. Four lines come back: title, User-Agent, Referer, then one URL (picture and sound together)
+        # or two (picture, then sound).
+        info=$(yt-dlp --no-playlist --no-warnings -f "$FORMAT" \
+                 --print '%(title)s' --print '%(http_headers.User-Agent|)s' --print '%(http_headers.Referer|)s' \
+                 --print urls -- "$target") || { echo "shabnam-player: yt-dlp found no playable stream in $target" >&2; exit 1; }
+        title=$(printf '%s\n' "$info" | sed -n 1p)
+        agent=$(printf '%s\n' "$info" | sed -n 2p)
+        referer=$(printf '%s\n' "$info" | sed -n 3p)
+        video=$(printf '%s\n' "$info" | sed -n 4p)
+        audio=$(printf '%s\n' "$info" | sed -n 5p)
+        [ -n "$video" ] || { echo "shabnam-player: yt-dlp returned no stream for $target" >&2; exit 1; }
+        # shellcheck disable=SC2086
+        exec shabnam-video $SHABNAM_PLAYER_FLAGS ${title:+--title "$title"} ${agent:+--user-agent "$agent"} \
+          ${referer:+--referer "$referer"} ${audio:+--audio "$audio"} "$video"
+        ;;
+    esac ;;
+esac
+# shellcheck disable=SC2086
+exec shabnam-video $SHABNAM_PLAYER_FLAGS ${title:+--title "$title"} "$target"

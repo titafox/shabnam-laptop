@@ -37,7 +37,7 @@ Mac 端的设置窗口：
 
 - **桌面**：[niri](https://github.com/YaLTeR/niri) 合成器（打了适配 Mali 驱动的补丁）加自己写的
   `shabnam-shell`：底栏、启动器、快捷设置、音量和亮度提示。外观参考 ChromeOS 的布局和 macOS 的图标风格。
-- **应用**：Chromium 浏览器、foot 终端加 fish、文件管理（yazi）、文本编辑（Helix）。
+- **应用**：Chromium 浏览器、foot 终端加 fish、文件管理（yazi）、文本编辑（Helix）、硬件解码的视频播放器。
 - **中文**：Noto CJK 字体，fcitx5 拼音输入法。
 - **系统**：Wi-Fi（wpa_supplicant，可在快捷设置里切换网络）、声音（PipeWire）、
   对时（ntpd-rs）、亮度和音量键、合盖关屏、关机和重启。
@@ -74,6 +74,7 @@ Mac 端的设置窗口：
 | `linux-rust/shabnam-shell/` | 桌面外壳：底栏、启动器、快捷设置。Rust，用处理器绘制（wl_shm），不依赖显卡驱动 |
 | `linux-rust/subscreen-rx/` | 副屏接收端：Rockchip MPP 硬解 H.264，直接用 KMS 显示，ALSA 播放，转发输入事件。另含开机画面程序 `shabnam-splash` |
 | `linux-rust/mac/ShabnamDisplay/` | Mac 菜单栏应用（Swift）：虚拟显示器、屏幕捕获、编码、声音、输入注入、设置窗口。有独立的 README 和协议文档 |
+| `linux-rust/shabnam-video/` | 视频播放器：GStreamer 加瑞芯微硬解插件（`mppvideodec`），解出的画面直接交给合成器，不经处理器拷贝。C，约 900 行 |
 | `linux-rust/device/` | 装在笔记本上的脚本和配置：启动、会话、Wi-Fi、声音、浏览器包装、输入法、终端、niri 配置 |
 | `linux-rust/patches/` | niri 和 smithay 适配 Mali 驱动的补丁 |
 | `linux-rust/branding/` | 标志、壁纸、开机画面、应用图标 |
@@ -96,6 +97,18 @@ Mac 端的设置窗口：
 | `Ctrl+空格` | 中英文切换 |
 | `Win+Esc` | 在桌面和 Mac 副屏之间切换 |
 
+## 视频播放器
+
+`shabnam-player 文件或网址`，启动器里叫「视频」。画面由 RK3568 的硬件解码器解码，支持 H.264、HEVC、VP9，
+1080p 60 帧时不丢帧，占用不到四分之一个处理器核心（同一段视频软件解码只有 5 帧/秒）。
+网页地址由 yt-dlp 解析为不高于 1080p 的 H.264 流，不登录任何账号。播放器以普通用户运行。
+
+按键：空格暂停，`←/→` 快退快进 10 秒（加 Shift 为 60 秒），`↑/↓` 音量，`M` 静音，`F` 或双击全屏，`Q` 退出。
+
+限制：不显示字幕；不支持 10 位色片源；网页地址解析约需 15 秒。
+
+> 以上帧率数字是不显示画面时测得的；画面上屏、全屏和按键还没有在真机屏幕上验证过。
+
 ## 构建
 
 所有东西都在 Mac 上交叉编译，不在笔记本上编译。需要 Rust、`cargo-zigbuild`、Zig，以及一份从设备上拷出来的 `/usr` 作为 sysroot。
@@ -117,7 +130,7 @@ cd linux-rust/mac/ShabnamDisplay && make app
 
 - **浏览器没有沙箱。** 原厂内核没有编译用户命名空间，Chromium 的沙箱无法启动。
   浏览器以一个单独的受限用户运行，与桌面（root）隔开，只共享显示和声音两个连接。
-- **没有浏览器可用的视频硬解。** 网页视频是软件解码，1080p 会掉帧。
+- **浏览器里没有视频硬解。** 网页视频是软件解码，720p 流畅，1080p 会掉帧；要看 1080p 用视频播放器。
 - **休眠还没做。** 合盖目前只关背光。
 - **桌面以 root 运行**，在一个 chroot 里，没有登录管理器。
 - **依赖不在仓库里的东西**：厂商的 Mali 驱动、Rockchip MPP、Void Linux 根文件系统、打过补丁的 niri。

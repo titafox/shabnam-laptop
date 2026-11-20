@@ -17,6 +17,11 @@ input {
     }
 }
 prefer-no-csd
+// Always draw windows through the graphics chip. Handing a window's picture straight to a display
+// plane ("direct scanout") makes this display controller flicker, most visibly with the browser.
+debug {
+    disable-direct-scanout
+}
 // Shabnam brand colours: deep navy backdrop, teal focus ring.
 layout {
     // The screen is small (1280x720 after scaling): every window opens full width instead of

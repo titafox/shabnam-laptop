@@ -1,0 +1,41 @@
+diff --git a/gst/rockchipmpp/gstmppjpegdec.c b/gst/rockchipmpp/gstmppjpegdec.c
+index 327d939..c931bb9 100644
+--- a/gst/rockchipmpp/gstmppjpegdec.c
++++ b/gst/rockchipmpp/gstmppjpegdec.c
+@@ -216,7 +216,6 @@ gst_mpp_jpeg_dec_required_size (GstVideoDecoder * decoder)
+   GstVideoInfo *info = &mppdec->info;
+   GstVideoFormat gst_format;
+   MppFrameFormat mpp_format;
+-  MppSysCfg cfg;
+   guint width, height, hstride, vstride, size;
+ 
+   gst_format = GST_VIDEO_INFO_FORMAT (info);
+@@ -230,25 +229,9 @@ gst_mpp_jpeg_dec_required_size (GstVideoDecoder * decoder)
+   /* FIXME: Workaround MPP's JPEG parser size requirement issue (w * h * 4) */
+   size = width * height * 4;
+ 
+-  /* Based on mpp/base/test/mpp_sys_cfg_test.c */
+-
+-  if (mpp_sys_cfg_get (&cfg))
+-    return size;
+-
+-  mpp_sys_cfg_set_u32 (cfg, "dec_buf_chk:type", 1);
+-  mpp_sys_cfg_set_u32 (cfg, "dec_buf_chk:enable", 1);
+-  mpp_sys_cfg_set_u32 (cfg, "dec_buf_chk:type", MPP_VIDEO_CodingMJPEG);
+-  mpp_sys_cfg_set_u32 (cfg, "dec_buf_chk:fmt_codec", mpp_format);
+-  mpp_sys_cfg_set_u32 (cfg, "dec_buf_chk:fmt_fbc", 0);
+-  mpp_sys_cfg_set_u32 (cfg, "dec_buf_chk:width", width);
+-  mpp_sys_cfg_set_u32 (cfg, "dec_buf_chk:height", height);
+-  mpp_sys_cfg_set_u32 (cfg, "dec_buf_chk:h_stride_by_byte", hstride);
+-  mpp_sys_cfg_set_u32 (cfg, "dec_buf_chk:v_stride", vstride);
+-
+-  mpp_sys_cfg_ioctl (cfg);
+-  mpp_sys_cfg_get_u32 (cfg, "dec_buf_chk:size_total", &size);
+-
+-  mpp_sys_cfg_put (cfg);
++  /* Shabnam: the MPP 1.5.0 library on the device has no mpp_sys_cfg API;
++   * keep the w*h*4 estimate. */
++  (void) mpp_format; (void) hstride; (void) vstride;
+ 
+   return size;
+ }

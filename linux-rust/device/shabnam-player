@@ -13,8 +13,9 @@
 # Who it runs as: the desktop runs as root, a program that parses files from the network must not. Like
 # shabnam-browser, this script lets the unprivileged user "shabnam" (uid 700) reach the compositor's and the
 # sound server's sockets — nothing else — and drops to that user. The decoder device /dev/mpp_service is
-# open to everyone already. A local file is opened here, by the caller, and handed over as an open file
-# descriptor, so files the user "shabnam" could not read by itself (anything under /root) still play.
+# open to everyone already. A local file in a folder only root controls (anything under /root) is
+# opened here and handed over as an open file descriptor, so it plays although that user cannot read it;
+# every other file the player opens itself, with its own rights.
 umask 022
 PLAYER_USER=shabnam
 MPP_LIBS=/opt/mpp2/usr/lib/aarch64-linux-gnu
@@ -38,21 +39,22 @@ if [ "$(id -u)" = 0 ]; then
   case $target in
     *://*) ;;
     *)
-      # This script opens the file as root and hands the open file to the unprivileged player.
-      # Everything is checked on the file that was actually opened (through the open descriptor, which the helper programs inherit), never
-      # again by name, so swapping the path afterwards changes nothing.
-      exec 3<"$target" || { echo "shabnam-player: cannot open: $target" >&2; exit 1; }
-      opened=$(readlink /proc/self/fd/3); set -- $(stat -L -c '%f %h' /proc/self/fd/3)
-      mode=$((0x$1)); links=$2
-      [ $((mode & 0170000)) -eq $((0100000)) ] || { echo "shabnam-player: not a regular file: $target" >&2; exit 1; }
-      # A file that is not readable by everyone is private. It is handed over only when it was reached
-      # by its plain path: a link (placed, say, among the browser's downloads) must not make root open
-      # a private file for that user.
-      if [ $((mode & 0004)) -eq 0 ]; then
-        [ "$(realpath -s -- "$target")" = "$opened" ] && [ "$links" = 1 ] ||
-          { echo "shabnam-player: refusing a linked private file: $target" >&2; exit 1; }
-      fi
-      title=$(basename "$target"); target=fd://3 ;;
+      real=$(realpath -e -- "$target" 2>/dev/null) && [ -f "$real" ] ||
+        { echo "shabnam-player: no such file: $target" >&2; exit 1; }
+      title=$(basename "$target")
+      # Root opens the file for the unprivileged player only when nobody but root could have arranged
+      # what the path leads to: no link anywhere in the path, and every folder on the way belongs to
+      # root and is writable by root alone (so /root/Videos/film.mp4 plays although that user cannot
+      # enter /root). Any other path — downloads, /tmp, removable media, anything reached through a
+      # link — is passed on as a name and the unprivileged player opens it with its own rights.
+      trusted=1
+      [ "$(realpath -s -- "$target")" = "$real" ] || trusted=0
+      d=$(dirname "$real")
+      while [ "$trusted" = 1 ]; do
+        set -- $(stat -c '%u %f' -- "$d"); [ "$1" = 0 ] && [ $((0x$2 & 022)) -eq 0 ] || trusted=0
+        [ "$d" = / ] && break; d=$(dirname "$d")
+      done
+      if [ "$trusted" = 1 ]; then exec 3<"$real" || exit 1; target=fd://3; else target=$real; fi ;;
   esac
   uid=$(id -u "$PLAYER_USER") || { echo "shabnam-player: user $PLAYER_USER is missing" >&2; exit 1; }
   # The same two hard links shabnam-browser makes; see there for why they are safe.

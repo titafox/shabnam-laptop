@@ -76,7 +76,17 @@ final class AppModel: ObservableObject {
 
 extension LinkState {
     /// The status line: menu, tooltip and Settings.
-    var localizedDescription: String {
+    var localizedDescription: String { description(laptop: nil) }
+
+    /// The same line, knowing what the laptop itself reports: while it is reachable on its own
+    /// desktop the app is not "waiting" for it — it is there, just not being a second screen.
+    func description(laptop: LaptopStatus?) -> String {
+        if let laptop, laptop.ownDesktop {
+            switch self {
+            case .waiting, .stopped: return L("Laptop connected · on its own desktop")
+            default: break
+            }
+        }
         let format = "\(VirtualDisplay.height)p"
         switch self {
         case .stopped:

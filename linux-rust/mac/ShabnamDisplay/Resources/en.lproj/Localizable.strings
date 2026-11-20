@@ -4,6 +4,7 @@
 "The laptop disconnected." = "The laptop disconnected.";
 "Could not change the login item" = "Could not change the login item";
 "Disconnected" = "Disconnected";
+"Laptop connected · on its own desktop" = "Laptop connected · on its own desktop";
 "Waiting for laptop" = "Waiting for laptop";
 "Connected · %@" = "Connected · %@";
 "Connected · %@ · %d fps · %@ Mbit/s" = "Connected · %@ · %d fps · %@ Mbit/s";

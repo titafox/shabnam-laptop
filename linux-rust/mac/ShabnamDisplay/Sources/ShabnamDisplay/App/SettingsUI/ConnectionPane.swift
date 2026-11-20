@@ -45,7 +45,7 @@ struct ConnectionPane: View {
                 Note(L("The laptop needs an identical copy of this file (the one given to subscreen-rx with --key). Copy it over a channel you trust, for example with scp across the cable; never share it. Its contents are never shown here."))
             }
             Section(L("Statistics")) {
-                LabeledContent(L("State"), value: model.state.localizedDescription)
+                LabeledContent(L("State"), value: model.state.description(laptop: model.laptop))
                 LabeledContent(L("Connected for"), value: uptime)
                 LabeledContent(L("Video"), value: L("%d fps · %@ Mbit/s", Int(model.stats.fps.rounded()), LinkState.megabits(model.stats.megabitsPerSecond)))
                 LabeledContent(L("Frames dropped by the encoder"), value: "\(model.stats.framesDropped)")

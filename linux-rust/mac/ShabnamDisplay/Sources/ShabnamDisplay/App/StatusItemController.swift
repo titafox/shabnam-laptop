@@ -101,7 +101,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     /// Redraws from the current state and settings.
     func refresh() {
-        let text = state.localizedDescription
+        let text = state.description(laptop: laptop.status)
         statusLine.title = text
         item.button?.toolTip = ProjectInfo.name + " — " + text
         switch state {
@@ -140,6 +140,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Battery, brightness, volume and mute as the laptop reports them; nil hides the controls.
     /// Main thread. Also called while the menu is open, so the figures stay current.
     func showLaptop(_ status: LaptopStatus?) {
+        let text = state.description(laptop: status)
+        statusLine.title = text
+        item.button?.toolTip = ProjectInfo.name + " — " + text
         let entries = [batteryLine, brightnessItem, volumeItem, muteItem, screenItem, modeItem, powerItem, laptopSeparator]
         guard let status else {
             entries.forEach { $0.isHidden = true }

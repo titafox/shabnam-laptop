@@ -4,6 +4,7 @@
 "The laptop disconnected." = "笔记本已断开连接。";
 "Could not change the login item" = "无法更改登录项";
 "Disconnected" = "未连接";
+"Laptop connected · on its own desktop" = "水滴已连接 · 在自己的桌面";
 "Waiting for laptop" = "正在等待笔记本";
 "Connected · %@" = "已连接 · %@";
 "Connected · %@ · %d fps · %@ Mbit/s" = "已连接 · %@ · %d 帧/秒 · %@ Mbit/s";

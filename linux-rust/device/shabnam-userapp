@@ -39,7 +39,11 @@ if [ "$(id -u)" = 0 ]; then
   done
   cd "$home" || exit 1
   # shellcheck disable=SC2086
-  exec setpriv --reuid "$APP_USER" --regid "$APP_USER" --init-groups \
+  # The program must not keep the terminal this script was started from: with root's terminal
+  # as its controlling terminal it could type into root's shell (TIOCSTI). New session, no
+  # terminal file descriptors, and no way to gain privileges back.
+  [ -t 0 ] && exec </dev/null; [ -t 1 ] && exec >/dev/null; [ -t 2 ] && exec 2>/dev/null
+  exec setsid -w setpriv --no-new-privs --reuid "$APP_USER" --regid "$APP_USER" --init-groups \
     env -i HOME="$home" USER="$APP_USER" LOGNAME="$APP_USER" SHELL=/bin/sh \
       PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-zh_CN.UTF-8}" \
       ${LC_ALL:+LC_ALL="$LC_ALL"} ${LC_MESSAGES:+LC_MESSAGES="$LC_MESSAGES"} ${TZ:+TZ="$TZ"} \

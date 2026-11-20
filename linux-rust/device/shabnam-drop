@@ -69,7 +69,11 @@ case ${1:-show} in
       fail "$downloads does not belong to $DESKTOP_USER"
     chgrp "$DROP_USER" /proc/self/fd/3 && chmod g+ws /proc/self/fd/3 || fail "cannot prepare $downloads"
     cd / || exit 1
-    exec setpriv --reuid "$DROP_USER" --regid "$DROP_USER" --init-groups \
+    # The program must not keep the terminal this script was started from: with root's terminal
+    # as its controlling terminal it could type into root's shell (TIOCSTI). New session, no
+    # terminal file descriptors, and no way to gain privileges back.
+    [ -t 0 ] && exec </dev/null; [ -t 1 ] && exec >/dev/null; [ -t 2 ] && exec 2>/dev/null
+    exec setsid -w setpriv --no-new-privs --reuid "$DROP_USER" --regid "$DROP_USER" --init-groups \
       env -i HOME="$state" USER="$DROP_USER" LOGNAME="$DROP_USER" SHELL=/bin/sh \
         PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-zh_CN.UTF-8}" ${TZ:+TZ="$TZ"} \
         SHABNAM_DROP_IFACE="$INTERFACE" SHABNAM_DROP_DIR_FD=3 \

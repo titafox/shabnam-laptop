@@ -39,6 +39,78 @@ pub fn check_size(files: usize, bytes: u64, free: u64) -> Result<(), Refusal> {
     }
 }
 
+/// Most files of one transfer that may arrive at the same time.
+pub const MAX_CONCURRENT: usize = 4;
+
+/// Why an upload request inside an accepted transfer is turned away.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum UploadDenied {
+    /// Not one of the files the owner accepted.
+    Unknown,
+    /// This file is arriving right now.
+    InFlight,
+    /// This file has arrived already.
+    Completed,
+    /// Too many files are arriving at once.
+    TooMany,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum UploadState {
+    Waiting,
+    InFlight,
+    Completed,
+}
+
+/// The files of one accepted transfer: each may be in flight once, and may complete once.
+/// (A file whose upload failed may be tried again; the bytes it wrote stay counted, see `charge`.)
+#[derive(Debug)]
+pub struct Uploads {
+    files: std::collections::HashMap<String, (u64, UploadState)>,
+}
+
+impl Uploads {
+    /// `files`: id and announced size of every accepted file.
+    pub fn new(files: impl IntoIterator<Item = (String, u64)>) -> Uploads {
+        Uploads { files: files.into_iter().map(|(id, size)| (id, (size, UploadState::Waiting))).collect() }
+    }
+
+    pub fn in_flight(&self) -> usize {
+        self.files.values().filter(|(_, state)| *state == UploadState::InFlight).count()
+    }
+
+    /// An upload of `id` wants to start: its accepted size, or why not.
+    pub fn begin(&mut self, id: &str) -> Result<u64, UploadDenied> {
+        let busy = self.in_flight();
+        let (size, state) = self.files.get_mut(id).ok_or(UploadDenied::Unknown)?;
+        match state {
+            UploadState::InFlight => Err(UploadDenied::InFlight),
+            UploadState::Completed => Err(UploadDenied::Completed),
+            UploadState::Waiting if busy >= MAX_CONCURRENT => Err(UploadDenied::TooMany),
+            UploadState::Waiting => {
+                *state = UploadState::InFlight;
+                Ok(*size)
+            }
+        }
+    }
+
+    /// The upload of `id` ended, saved or not.
+    pub fn end(&mut self, id: &str, saved: bool) {
+        if let Some((_, state)) = self.files.get_mut(id).filter(|(_, state)| *state == UploadState::InFlight) {
+            *state = if saved { UploadState::Completed } else { UploadState::Waiting };
+        }
+    }
+}
+
+/// Counts `bytes` about to be written against the transfer's accepted `total`. `written` is the
+/// one counter of the whole transfer, shared by all its files and never reset, so repeated or
+/// parallel uploads cannot add up to more than the owner agreed to. False: over the total —
+/// nothing more may be written.
+pub fn charge(written: &std::sync::atomic::AtomicU64, bytes: u64, total: u64) -> bool {
+    use std::sync::atomic::Ordering;
+    written.fetch_add(bytes, Ordering::SeqCst).checked_add(bytes).is_some_and(|now| now <= total)
+}
+
 /// What to do with an offer that passed the checks.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Verdict {
@@ -123,6 +195,52 @@ mod tests {
         assert_eq!(check_size(1, 5 << 30, 5 << 30), Err(Refusal::NoSpace));
         assert_eq!(check_size(1, u64::MAX, u64::MAX), Err(Refusal::TooBig));
         assert_eq!(check_size(1, 1, RESERVE), Err(Refusal::NoSpace));
+    }
+
+    #[test]
+    fn a_file_arrives_once() {
+        let mut uploads = Uploads::new([("a".to_string(), 10), ("b".to_string(), 20)]);
+        assert_eq!(uploads.begin("nope"), Err(UploadDenied::Unknown));
+        assert_eq!(uploads.begin("a"), Ok(10));
+        // The same file again while it is arriving.
+        assert_eq!(uploads.begin("a"), Err(UploadDenied::InFlight));
+        uploads.end("a", true);
+        // ... and after it has arrived.
+        assert_eq!(uploads.begin("a"), Err(UploadDenied::Completed));
+        // A failed upload may be tried again, once at a time.
+        assert_eq!(uploads.begin("b"), Ok(20));
+        uploads.end("b", false);
+        assert_eq!(uploads.begin("b"), Ok(20));
+        assert_eq!(uploads.begin("b"), Err(UploadDenied::InFlight));
+        // Ending something that is not in flight changes nothing.
+        uploads.end("a", false);
+        assert_eq!(uploads.begin("a"), Err(UploadDenied::Completed));
+    }
+
+    #[test]
+    fn only_a_few_at_once() {
+        let mut uploads = Uploads::new((0..10).map(|i| (format!("f{i}"), 1)));
+        for i in 0..MAX_CONCURRENT {
+            assert_eq!(uploads.begin(&format!("f{i}")), Ok(1));
+        }
+        assert_eq!(uploads.in_flight(), MAX_CONCURRENT);
+        assert_eq!(uploads.begin("f9"), Err(UploadDenied::TooMany));
+        uploads.end("f0", true);
+        assert_eq!(uploads.begin("f9"), Ok(1));
+    }
+
+    #[test]
+    fn the_whole_transfer_has_one_budget() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let written = AtomicU64::new(0);
+        assert!(charge(&written, 60, 100));
+        assert!(charge(&written, 40, 100));
+        // A retried or repeated file draws on the same budget.
+        assert!(!charge(&written, 1, 100));
+        assert!(!charge(&written, 0, 100), "once over, it stays over");
+        assert!(written.load(Ordering::SeqCst) > 100);
+        assert!(!charge(&AtomicU64::new(u64::MAX - 1), 5, u64::MAX));
+        assert!(charge(&AtomicU64::new(0), 0, 0));
     }
 
     #[test]

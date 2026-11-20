@@ -1,14 +1,20 @@
-//! shabnam-send [--to NAME-or-ADDRESS] FILE... — sends files to a LocalSend-compatible device on
-//! the home Wi-Fi. Without --to it lists the devices it found and asks which one.
+//! shabnam-send [--yes] [--to NAME-or-ADDRESS] FILE... — sends files to a LocalSend-compatible
+//! device on the home Wi-Fi. Without --to it lists the devices it found and asks which one.
 //!
 //! Who it runs as: the desktop runs as root, and a program that talks to other machines must
 //! not. Started by root, this program opens the files first (so files under /root can be sent),
-//! then gives up root for good — it becomes the user "shabnam" — and only then touches the
-//! network. The other device sees the same name and certificate as the receiver (shabnam-dropd).
+//! then gives up root for good — it becomes the receiver's own user "shabnam-drop", which nothing
+//! else (not the browser) runs as — and only then touches the network. The other device sees
+//! the same name and certificate as the receiver (shabnam-dropd).
 //!
 //! Devices: when the receiver is running it is asked for the devices it knows (it owns the
-//! protocol's port); otherwise this program listens on the Wi-Fi address itself for the few
-//! seconds the search takes, declining anything offered to it meanwhile.
+//! protocol's port) — after checking that the process on the socket really is the receiver's
+//! user; otherwise this program listens on the Wi-Fi address itself for the few seconds the
+//! search takes, declining anything offered to it meanwhile.
+//!
+//! Before anything leaves, the target is shown — name, address, certificate fingerprint — and,
+//! when the files were opened with root's rights, the owner must confirm it (or have said --yes
+//! on the command line). The connection then accepts only that certificate.
 
 use bytes::Bytes;
 use localsend::http::client::{ClientError, LsHttpClient, LsHttpClientVersion};
@@ -27,7 +33,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-const USER: &str = "shabnam";
+const USER: &str = ipc::DAEMON_USER;
 
 /// Everything this program says, in the system's three languages (zh, ru, en).
 #[derive(Clone, Copy)]
@@ -38,6 +44,10 @@ enum Say {
     NoDevices,
     NoWifi,
     Choose,
+    Target,
+    Fingerprint,
+    Unencrypted,
+    Confirm,
     NoSuchDevice,
     Waiting,
     Declined,
@@ -51,12 +61,16 @@ enum Say {
 
 fn say(lang: Lang, what: Say) -> &'static str {
     let (zh, ru, en) = match what {
-        Say::Usage => ("用法：shabnam-send [--to 设备名或地址] 文件…", "Использование: shabnam-send [--to ИМЯ-или-АДРЕС] ФАЙЛ…", "usage: shabnam-send [--to NAME-or-ADDRESS] FILE..."),
+        Say::Usage => ("用法：shabnam-send [--yes] [--to 设备名或地址] 文件…", "Использование: shabnam-send [--yes] [--to ИМЯ-или-АДРЕС] ФАЙЛ…", "usage: shabnam-send [--yes] [--to NAME-or-ADDRESS] FILE..."),
         Say::NotAFile => ("不是普通文件，已跳过", "не обычный файл, пропущен", "not a regular file, skipped"),
         Say::Searching => ("正在查找附近的设备…", "Поиск устройств поблизости…", "Looking for nearby devices…"),
         Say::NoDevices => ("没有找到设备。请在对方设备上打开 LocalSend，并确认连着同一个 Wi-Fi。", "Устройства не найдены. Откройте LocalSend на другом устройстве в той же сети Wi-Fi.", "No devices found. Open LocalSend on the other device, on the same Wi-Fi."),
         Say::NoWifi => ("Wi-Fi 未连接。", "Wi-Fi не подключён.", "Wi-Fi is not connected."),
         Say::Choose => ("发送到哪台设备？输入编号后回车（直接回车取消）：", "На какое устройство отправить? Номер и Enter (пустая строка — отмена): ", "Send to which device? Number, then Enter (empty to cancel): "),
+        Say::Target => ("发送到", "Получатель", "Sending to"),
+        Say::Fingerprint => ("证书指纹", "отпечаток сертификата", "certificate fingerprint"),
+        Say::Unencrypted => ("未加密，无法确认对方身份", "без шифрования, получателя нельзя проверить", "not encrypted, the device cannot be verified"),
+        Say::Confirm => ("确认发送？输入 y 后回车：", "Отправить? Введите y и Enter: ", "Send? Type y, then Enter: "),
         Say::NoSuchDevice => ("找不到这台设备", "Устройство не найдено", "No such device"),
         Say::Waiting => ("等待对方接受…", "Ожидание подтверждения…", "Waiting for the other side to accept…"),
         Say::Declined => ("对方拒绝了。", "Получатель отклонил передачу.", "The other side declined."),
@@ -108,13 +122,7 @@ fn drop_root() -> Result<(), String> {
     if unsafe { libc::geteuid() } != 0 {
         return Ok(());
     }
-    let name = std::ffi::CString::new(USER).unwrap();
-    let entry = unsafe { libc::getpwnam(name.as_ptr()) };
-    if entry.is_null() {
-        return Err(format!("user {USER} is missing"));
-    }
-    let (uid, gid) = unsafe { ((*entry).pw_uid, (*entry).pw_gid) };
-    let home = unsafe { std::ffi::CStr::from_ptr((*entry).pw_dir) }.to_string_lossy().into_owned();
+    let (uid, gid, home) = net::user(USER).ok_or_else(|| format!("user {USER} is missing"))?;
     if uid == 0 {
         return Err(format!("user {USER} is root"));
     }
@@ -125,8 +133,7 @@ fn drop_root() -> Result<(), String> {
     }
     std::env::set_var("HOME", &home);
     std::env::set_var("USER", USER);
-    std::env::set_var("XDG_RUNTIME_DIR", format!("/run/user/{uid}"));
-    for name in ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "LD_LIBRARY_PATH", "LD_PRELOAD"] {
+    for name in ["XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "LD_LIBRARY_PATH", "LD_PRELOAD"] {
         std::env::remove_var(name);
     }
     let _ = std::env::set_current_dir(&home);
@@ -141,12 +148,16 @@ fn main() {
     if hold {
         args.remove(0);
     }
+    let yes = args.first().is_some_and(|a| a == "--yes");
+    if yes {
+        args.remove(0);
+    }
     let mut to = None;
     if args.first().is_some_and(|a| a == "--to") && args.len() >= 2 {
         to = Some(args.remove(1));
         args.remove(0);
     }
-    let code = match run(lang, to, args) {
+    let code = match run(lang, yes, to, args) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("shabnam-send: {e}");
@@ -160,7 +171,7 @@ fn main() {
     std::process::exit(code);
 }
 
-fn run(lang: Lang, to: Option<String>, paths: Vec<String>) -> Result<(), String> {
+fn run(lang: Lang, yes: bool, to: Option<String>, paths: Vec<String>) -> Result<(), String> {
     unsafe { libc::umask(0o077) };
     if paths.is_empty() || paths.iter().any(|p| p.starts_with("--")) {
         return Err(say(lang, Say::Usage).into());
@@ -181,20 +192,21 @@ fn run(lang: Lang, to: Option<String>, paths: Vec<String>) -> Result<(), String>
     if files.is_empty() {
         return Err(say(lang, Say::Usage).into());
     }
+    // Files opened with root's rights never leave without the owner's word for the target.
+    let confirm = unsafe { libc::geteuid() } == 0 && !yes;
     drop_root()?;
     if std::env::var_os("SHABNAM_DROP_LOG").is_some() {
         let _ = tracing_subscriber::fmt().with_writer(std::io::stderr).try_init();
     }
     let identity = Identity::load_or_generate(&net::config_dir()?, policy::alias(lang))?;
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().map_err(|e| e.to_string())?;
-    runtime.block_on(send(lang, identity, to, files))
+    runtime.block_on(send(lang, confirm, identity, to, files))
 }
 
-/// Asks the running receiver for its device list; None when it is not running.
+/// Asks the running receiver for its device list; None when it is not running — or when what
+/// answers on its socket is not the receiver's user (then this program searches by itself).
 fn devices_from_daemon() -> Option<Vec<Device>> {
-    let uid = unsafe { libc::getuid() };
-    let dir = std::env::var("XDG_RUNTIME_DIR").ok().filter(|d| d.starts_with('/')).unwrap_or_else(|| format!("/run/user/{uid}"));
-    let mut stream = std::os::unix::net::UnixStream::connect(format!("{dir}/{}", ipc::SOCKET_NAME)).ok()?;
+    let mut stream = net::connect_daemon()?;
     stream.write_all(ToDaemon::Devices.encode().as_bytes()).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(4))).ok()?;
     let mut lines = ipc::Lines::default();
@@ -272,7 +284,7 @@ fn choose(lang: Lang, devices: &[Device], to: Option<&str>) -> Result<Option<Dev
         return found.cloned().map(Some).ok_or_else(|| format!("{}: {wanted}", say(lang, Say::NoSuchDevice)));
     }
     for (i, device) in devices.iter().enumerate() {
-        println!("  {}  {}  ({})", i + 1, device.alias, device.host);
+        println!("  {}  {}  ({}, {})", i + 1, device.alias, device.host, short(&device.fingerprint));
     }
     print!("{}", say(lang, Say::Choose));
     let _ = std::io::stdout().flush();
@@ -284,6 +296,23 @@ fn choose(lang: Lang, devices: &[Device], to: Option<&str>) -> Result<Option<Dev
     }
     let index = line.parse::<usize>().ok().filter(|n| (1..=devices.len()).contains(n)).ok_or_else(|| say(lang, Say::NoSuchDevice).to_string())?;
     Ok(Some(devices[index - 1].clone()))
+}
+
+/// A fingerprint in a form a person can compare: the first 16 characters, in groups of four.
+fn short(fingerprint: &str) -> String {
+    let head: Vec<char> = fingerprint.chars().filter(char::is_ascii_alphanumeric).take(16).collect();
+    head.chunks(4).map(|group| group.iter().collect::<String>()).collect::<Vec<_>>().join(" ")
+}
+
+/// The line that says where the files are about to go.
+fn describe(lang: Lang, device: &Device) -> String {
+    let proof = if device.https { format!("{} {}", say(lang, Say::Fingerprint), short(&device.fingerprint)) } else { say(lang, Say::Unencrypted).to_string() };
+    format!("{}: {}  {}:{}  {proof}", say(lang, Say::Target), device.alias, device.host, device.port)
+}
+
+/// Only a clear yes counts.
+fn is_yes(answer: &str) -> bool {
+    matches!(answer.trim(), "y" | "Y" | "yes" | "YES" | "д" | "Д" | "да" | "是")
 }
 
 /// Feeds an already open file to the upload, chunk by chunk.
@@ -313,7 +342,7 @@ fn content_of(file: std::fs::File, cancel: CancellationToken) -> FileContent {
     FileContent::Stream(rx)
 }
 
-async fn send(lang: Lang, identity: Identity, to: Option<String>, files: Vec<Outgoing>) -> Result<(), String> {
+async fn send(lang: Lang, confirm: bool, identity: Identity, to: Option<String>, files: Vec<Outgoing>) -> Result<(), String> {
     println!("{}", say(lang, Say::Searching));
     let devices = match tokio::task::spawn_blocking(devices_from_daemon).await.ok().flatten() {
         Some(list) => list,
@@ -330,6 +359,16 @@ async fn send(lang: Lang, identity: Identity, to: Option<String>, files: Vec<Out
         println!("{}", say(lang, Say::Cancelled));
         return Ok(());
     };
+    println!("{}", describe(lang, &device));
+    if confirm {
+        print!("{}", say(lang, Say::Confirm));
+        let _ = std::io::stdout().flush();
+        let mut answer = String::new();
+        if std::io::stdin().read_line(&mut answer).is_err() || !is_yes(&answer) {
+            println!("{}", say(lang, Say::Cancelled));
+            return Ok(());
+        }
+    }
     let protocol = if device.https { ProtocolType::Https } else { ProtocolType::Http };
     // The certificate the device showed when it was found is the only one accepted now.
     let pinned = device.https.then(|| device.fingerprint.clone());
@@ -411,4 +450,29 @@ async fn send(lang: Lang, identity: Identity, to: Option<String>, files: Vec<Out
     eprintln!("\r100%");
     println!("{} {count} → {}", say(lang, Say::Sent), device.alias);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_target_is_shown_in_full() {
+        let device = Device { alias: "Phone".into(), fingerprint: "AB12CD34EF56AB78FFFF0000".into(), host: "192.0.2.7".into(), port: 53317, https: true };
+        assert_eq!(short(&device.fingerprint), "AB12 CD34 EF56 AB78");
+        let line = describe(Lang::En, &device);
+        assert!(line.contains("Phone") && line.contains("192.0.2.7:53317") && line.contains("AB12 CD34 EF56 AB78"), "{line}");
+        let plain = describe(Lang::En, &Device { https: false, ..device });
+        assert!(plain.contains("not encrypted") && !plain.contains("AB12"));
+    }
+
+    #[test]
+    fn only_yes_confirms() {
+        for answer in ["y\n", "Y", " yes ", "да", "是"] {
+            assert!(is_yes(answer), "{answer}");
+        }
+        for answer in ["", "\n", "n", "no", "1", "yy", "ok"] {
+            assert!(!is_yes(answer), "{answer}");
+        }
+    }
 }

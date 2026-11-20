@@ -1,5 +1,7 @@
-//! shabnam-dropd — the receiving side of 隔空传送. Runs as the unprivileged user "shabnam" (the
-//! wrapper `shabnam-drop start` drops to it), only while the owner has switched receiving on.
+//! shabnam-dropd — the receiving side of 隔空传送. Runs as its own unprivileged user "shabnam-drop"
+//! (the wrapper `shabnam-drop start` drops to it), only while the owner has switched receiving on.
+//! Nothing else runs as that user: the browser and the player (user "shabnam") cannot touch this
+//! daemon's socket, certificate or process.
 //!
 //!   shabnam-dropd                 run (one per user); stops on `quit` from the shell or SIGTERM
 //!   shabnam-dropd ctl JSON [SEC]  testing: send one control line to the running daemon and print
@@ -9,10 +11,12 @@
 //! discovery group on that interface), speaking the LocalSend protocol through that project's own
 //! core library. Every offer is checked (sender on the same network, size limits, free space) and
 //! then shown by the desktop shell, which this daemon talks to over a unix socket in its 0700
-//! runtime directory (messages: ../ipc.rs). Without an answer from the shell nothing is accepted,
-//! unless the owner switched on "quick receive". Accepted files are written to ~/Downloads under a
-//! rewritten name (../names.rs), never over an existing file, mode 0644, and are never opened or
-//! run by this program.
+//! runtime directory /run/shabnam-drop (messages: ../ipc.rs). Without an answer from the shell
+//! nothing is accepted, unless the owner switched on "quick receive". Accepted files are written
+//! to the downloads directory the wrapper hands over as an open descriptor (/home/shabnam/Downloads)
+//! under a rewritten name (../names.rs), never over an existing file, mode 0644, and are never
+//! opened or run by this program. Inside an accepted transfer each file may arrive once, a few at
+//! a time, and all of them together never more than the accepted total (../policy.rs).
 
 use bytes::Bytes;
 use localsend::discovery::{DeviceChannel, DiscoveredDevice, DiscoveryEvent, HttpChannel};
@@ -67,6 +71,8 @@ struct Active {
     moved: Instant,
     /// file id -> the name it was saved under.
     saved: HashMap<String, String>,
+    /// Which accepted file may still arrive (each once, a few at a time).
+    uploads: policy::Uploads,
     failed: u32,
     writers: usize,
     ended: bool,
@@ -91,7 +97,7 @@ struct Daemon {
 fn runtime_dir() -> Result<PathBuf, String> {
     use std::os::unix::fs::MetadataExt;
     let uid = unsafe { libc::getuid() };
-    let dir = std::env::var("XDG_RUNTIME_DIR").ok().filter(|d| d.starts_with('/')).unwrap_or_else(|| format!("/run/user/{uid}"));
+    let dir = ipc::RUNTIME_DIR;
     let meta = std::fs::symlink_metadata(&dir).map_err(|e| format!("runtime directory {dir}: {e}"))?;
     if !meta.is_dir() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
         return Err(format!("runtime directory {dir} must be a directory of this user with mode 0700"));
@@ -103,9 +109,27 @@ fn socket_path() -> Result<PathBuf, String> {
     Ok(runtime_dir()?.join(ipc::SOCKET_NAME))
 }
 
-/// ~/Downloads as a real directory (created on first use; a link in its place is refused).
+/// The user whose Downloads directory receives the files (the desktop's unprivileged user).
+const DOWNLOADS_OWNER: &str = "shabnam";
+
+/// Where files go. Normally the wrapper (root) opened /home/shabnam/Downloads and passes the open
+/// directory as descriptor SHABNAM_DROP_DIR_FD: this user cannot enter /home/shabnam and does not
+/// need to. That home belongs to the browser's user, which could have put something else where
+/// Downloads should be — so the descriptor is only used if it is a directory owned by that user
+/// with this daemon's group (as the wrapper set it up), which rules out every directory that
+/// matters to anyone else, this daemon's own state directory included.
+/// Without the variable (development): ~/Downloads of whoever runs this.
 fn downloads_dir() -> Result<PathBuf, String> {
-    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+    if let Some(fd) = std::env::var("SHABNAM_DROP_DIR_FD").ok().and_then(|v| v.parse::<u32>().ok()).filter(|fd| (3..1024).contains(fd)) {
+        let dir = PathBuf::from(format!("/proc/self/fd/{fd}"));
+        let meta = std::fs::metadata(&dir).map_err(|e| format!("downloads directory (descriptor {fd}): {e}"))?;
+        let owner = net::user(DOWNLOADS_OWNER).map(|(uid, _, _)| uid);
+        if !meta.is_dir() || Some(meta.uid()) != owner || meta.gid() != unsafe { libc::getgid() } || meta.mode() & 0o020 == 0 {
+            return Err("the downloads directory is not what the wrapper should have prepared".into());
+        }
+        return Ok(dir);
+    }
     let home = std::env::var("HOME").ok().filter(|h| h.starts_with('/')).ok_or("HOME is not set")?;
     let dir = Path::new(&home).join("Downloads");
     match std::fs::symlink_metadata(&dir) {
@@ -132,12 +156,7 @@ fn main() {
 /// Testing aid: one line to the daemon, then print its lines for a while.
 fn ctl(line: &str, seconds: u64) -> Result<(), String> {
     use std::io::{Read, Write};
-    let uid = unsafe { libc::getuid() };
-    let path = match uid {
-        0 => PathBuf::from(format!("/run/user/{}/{}", std::env::var("SHABNAM_DROP_UID").unwrap_or_else(|_| "700".into()), ipc::SOCKET_NAME)),
-        _ => socket_path()?,
-    };
-    let mut stream = std::os::unix::net::UnixStream::connect(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut stream = net::connect_daemon().ok_or_else(|| format!("{}: the receiver is not running", ipc::socket_path()))?;
     if line != "-" {
         ipc::parse_to_daemon(line).ok_or("not a control message")?;
         stream.write_all(format!("{}\n", line.trim()).as_bytes()).map_err(|e| e.to_string())?;
@@ -158,6 +177,9 @@ fn ctl(line: &str, seconds: u64) -> Result<(), String> {
 fn run() -> Result<(), String> {
     if unsafe { libc::getuid() } == 0 {
         return Err("refusing to run as root; start it with `shabnam-drop start`".into());
+    }
+    if net::user(ipc::DAEMON_USER).is_some_and(|(uid, _, _)| uid != unsafe { libc::getuid() }) {
+        return Err(format!("this is to be run as the user {}; start it with `shabnam-drop start`", ipc::DAEMON_USER));
     }
     unsafe { libc::umask(0o022) };
     if std::env::var_os("SHABNAM_DROP_LOG").is_some() {
@@ -262,8 +284,10 @@ async fn accept_clients(listener: tokio::net::UnixListener, events: mpsc::Unboun
 }
 
 /// Writes one arriving file. Stops with an error when more than the announced size arrives, when
-/// the stream ends early, or when the transfer is cancelled.
-async fn write_part(mut chunks: mpsc::Receiver<Bytes>, file: std::fs::File, size: u64, done: Arc<AtomicU64>, cancel: CancellationToken) -> Result<(), String> {
+/// the stream ends early, or when the transfer is cancelled. Every chunk is first counted against
+/// the whole transfer's accepted `total` (`done` is the transfer's one counter): when that is
+/// exceeded the transfer is cancelled, which stops its other files too.
+async fn write_part(mut chunks: mpsc::Receiver<Bytes>, file: std::fs::File, size: u64, total: u64, done: Arc<AtomicU64>, cancel: CancellationToken) -> Result<(), String> {
     let mut file = tokio::fs::File::from_std(file);
     let mut written = 0u64;
     loop {
@@ -276,8 +300,11 @@ async fn write_part(mut chunks: mpsc::Receiver<Bytes>, file: std::fs::File, size
         if written > size {
             return Err(format!("more than the announced {size} bytes"));
         }
+        if !policy::charge(&done, chunk.len() as u64, total) {
+            cancel.cancel();
+            return Err(format!("more than the accepted {total} bytes in this transfer"));
+        }
         file.write_all(&chunk).await.map_err(|e| e.to_string())?;
-        done.fetch_add(chunk.len() as u64, Ordering::Relaxed);
     }
     file.flush().await.map_err(|e| e.to_string())?;
     if written != size {
@@ -447,6 +474,9 @@ impl Daemon {
                 if let Some(active) = self.active.as_mut().filter(|a| a.id == session) {
                     active.writers = active.writers.saturating_sub(1);
                     active.moved = Instant::now();
+                    active.uploads.end(&file_id, result.is_ok());
+                    // A writer found the transfer over its accepted total: all of it stops.
+                    let over = active.cancel.is_cancelled() && !active.ended;
                     match result {
                         Ok(name) => {
                             active.saved.insert(file_id, name);
@@ -455,6 +485,9 @@ impl Daemon {
                             active.failed += 1;
                             eprintln!("shabnam-dropd: a file was not saved: {e}");
                         }
+                    }
+                    if over {
+                        self.abort_active().await;
                     }
                     self.finish_if_over();
                 } else if let Ok(name) = result {
@@ -492,6 +525,7 @@ impl Daemon {
     fn accept(&mut self, pending: Pending) {
         let total = pending.files.values().map(|f| f.size).fold(0u64, u64::saturating_add);
         let ids = pending.files.keys().cloned().collect();
+        let uploads = policy::Uploads::new(pending.files.iter().map(|(id, file)| (id.clone(), file.size)));
         if pending.decision.send(PrepareUploadDecisionV2::Accept(ids)).is_err() {
             return; // the sender is gone
         }
@@ -503,6 +537,7 @@ impl Daemon {
             reported: 0,
             moved: Instant::now(),
             saved: HashMap::new(),
+            uploads,
             failed: 0,
             writers: 0,
             ended: false,
@@ -650,10 +685,16 @@ impl Daemon {
     fn receive_file(&mut self, session: String, file_id: String, file: FileDto, target: oneshot::Sender<FileUploadTarget>) {
         use std::os::unix::fs::OpenOptionsExt;
         let Some(active) = self.active.as_mut().filter(|a| a.id == session && !a.ended) else { return };
-        // A second attempt at the same file (after a checksum mismatch) replaces the first.
-        if let Some(old) = active.saved.remove(&file_id) {
-            let _ = std::fs::remove_file(self.dir.join(old));
-        }
+        // Each accepted file once, a few at a time; its size is the one that was accepted, not
+        // whatever this request claims. A refused request is answered with an error (`target` dropped).
+        let size = match active.uploads.begin(&file_id) {
+            Ok(size) => size,
+            Err(why) => {
+                eprintln!("shabnam-dropd: an upload was refused: {why:?}");
+                return;
+            }
+        };
+        let total = active.total;
         self.parts += 1;
         let part = names::part_path(&self.dir, &session, self.parts);
         let opened = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o644).custom_flags(libc::O_NOFOLLOW).open(&part);
@@ -661,6 +702,7 @@ impl Daemon {
             Ok(handle) => handle,
             Err(e) => {
                 eprintln!("shabnam-dropd: {}: {e}", part.display());
+                active.uploads.end(&file_id, false);
                 active.failed += 1;
                 return; // dropping `target` answers the sender with an error
             }
@@ -669,6 +711,7 @@ impl Daemon {
         let (result_tx, result_rx) = oneshot::channel();
         if target.send(FileUploadTarget::Stream { binary_tx, result_rx }).is_err() {
             let _ = std::fs::remove_file(&part);
+            active.uploads.end(&file_id, false);
             active.failed += 1;
             return;
         }
@@ -676,7 +719,7 @@ impl Daemon {
         let (done, cancel, dir, events) = (active.done.clone(), active.cancel.clone(), self.dir.clone(), self.events.clone());
         let wanted = names::sanitize(&file.file_name);
         tokio::spawn(async move {
-            let written = write_part(binary_rx, handle, file.size, done, cancel).await;
+            let written = write_part(binary_rx, handle, size, total, done, cancel).await;
             let result = match written {
                 Ok(()) => names::publish(&dir, &part, &wanted).map_err(|e| e.to_string()),
                 Err(e) => {

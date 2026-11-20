@@ -1,4 +1,4 @@
-//! The messages between the receiving daemon (shabnam-dropd, user "shabnam") and the desktop shell
+//! The messages between the receiving daemon (shabnam-dropd, its own user "shabnam-drop") and the desktop shell
 //! (shabnam-shell, root), over a unix socket: one JSON object per line, a fixed set of messages.
 //!
 //! This one file is compiled into both programs (the shell includes it by path), so the two
@@ -11,8 +11,18 @@
 
 use serde_json::{json, Value};
 
-/// Name of the socket inside the daemon user's runtime directory (/run/user/<uid>, mode 0700).
+/// The user the daemon runs as. Nothing else runs as it — in particular not the browser, which
+/// must be assumed hostile — so "the peer on the socket has this uid" means "it is the daemon".
+/// Both the shell and `shabnam-send` check exactly that before they believe a word.
+pub const DAEMON_USER: &str = "shabnam-drop";
+/// The daemon's runtime directory: made by root, owned by the daemon's user, mode 0700.
+pub const RUNTIME_DIR: &str = "/run/shabnam-drop";
+/// Name of the socket inside it.
 pub const SOCKET_NAME: &str = "shabnam-drop.sock";
+
+pub fn socket_path() -> String {
+    format!("{RUNTIME_DIR}/{SOCKET_NAME}")
+}
 /// No line is longer than this; a peer that sends more is disconnected.
 pub const MAX_LINE: usize = 8192;
 const MAX_NAME: usize = 120;

@@ -45,7 +45,8 @@ pub struct Identity {
     pub fingerprint: String,
 }
 
-/// $HOME/.config/shabnam-drop, created for this user only.
+/// $HOME/.config/shabnam-drop, created for this user only (the certificate's key lives here; HOME
+/// is the daemon user's own state directory, which no other user can enter).
 pub fn config_dir() -> Result<PathBuf, String> {
     use std::os::unix::fs::DirBuilderExt;
     let home = std::env::var("HOME").ok().filter(|h| h.starts_with('/')).ok_or("HOME is not set")?;
@@ -176,6 +177,39 @@ impl Net {
         let _ = tokio::time::timeout(wait, self.server.wait_stopped()).await;
         let _ = tokio::time::timeout(wait, self.discovery.wait_stopped()).await;
     }
+}
+
+/// (uid, gid, home) of a system user.
+pub fn user(name: &str) -> Option<(u32, u32, String)> {
+    let name = std::ffi::CString::new(name).ok()?;
+    let entry = unsafe { libc::getpwnam(name.as_ptr()) };
+    if entry.is_null() {
+        return None;
+    }
+    unsafe { Some(((*entry).pw_uid, (*entry).pw_gid, std::ffi::CStr::from_ptr((*entry).pw_dir).to_string_lossy().into_owned())) }
+}
+
+/// The uid of the process at the other end of a unix socket, as the kernel recorded it when the
+/// connection was made (it cannot be forged by the peer).
+#[cfg(target_os = "linux")]
+pub fn peer_uid(stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    use std::os::fd::AsRawFd;
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let ok = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, &mut cred as *mut _ as *mut libc::c_void, &mut len) } == 0;
+    (ok && len as usize == std::mem::size_of::<libc::ucred>()).then_some(cred.uid)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn peer_uid(_stream: &std::os::unix::net::UnixStream) -> Option<u32> {
+    None
+}
+
+/// Connects to the running daemon — only if the other end really is the daemon's user.
+pub fn connect_daemon() -> Option<std::os::unix::net::UnixStream> {
+    let (daemon, _, _) = user(crate::ipc::DAEMON_USER)?;
+    let stream = std::os::unix::net::UnixStream::connect(crate::ipc::socket_path()).ok()?;
+    (daemon != 0 && peer_uid(&stream) == Some(daemon)).then_some(stream)
 }
 
 /// Free bytes on the file system holding `dir` (for unprivileged users).

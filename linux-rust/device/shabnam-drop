@@ -4,47 +4,77 @@
 #
 #   shabnam-drop            show the switch (opens the shell's quick settings)
 #   shabnam-drop start      start receiving; stays in the foreground (the shell starts it detached
-#                           when the 「隔空传送」 switch in quick settings is turned on)
+#                           when the 「隔空传送」 switch in quick settings is turned on). Root only.
 #   shabnam-drop stop       stop receiving (closes the port)
 #   shabnam-drop status     prints "on" or "off"
 # Sending is a separate command: shabnam-send FILE...
 #
 # Receiving is OFF until the owner switches it on, and off again after every restart.
 #
-# Who it runs as: the desktop runs as root, a program that listens on the network must not. `start`
-# drops to the unprivileged user "shabnam" (uid 700, the browser's and the player's user) with an
-# empty environment and runs /usr/local/bin/shabnam-dropd (built by ../drop/build.sh). That daemon
-# listens on the Wi-Fi interface's address only (TCP 53317 and the discovery group, never usb0),
-# writes only into /home/shabnam/Downloads, never opens or runs what it receives, and accepts a
-# transfer only after the shell showed it and the owner clicked 接受 — unless 快速接收 is on.
-# The shell talks to it over /run/user/700/shabnam-drop.sock (directory mode 0700).
+# Who it runs as: the desktop runs as root, a program that listens on the network must not — and
+# it must not share a user with the browser either (user "shabnam", uid 700, to be assumed
+# hostile: same uid would let it replace the socket, read the certificate's key or stop the
+# daemon). So the receiver has a user of its own, which nothing else runs as:
+#     groupadd -g 701 shabnam-drop
+#     useradd -u 701 -g 701 -M -d /var/lib/shabnam-drop -s /sbin/nologin -c "隔空传送" shabnam-drop
+# (once, at installation). What belongs to it:
+#     /var/lib/shabnam-drop   0700  its home: the certificate and key (.config/shabnam-drop/identity.pem)
+#     /run/shabnam-drop       0700  the control socket shabnam-drop.sock (0600)
+# The shell (root) and shabnam-send talk to that socket only after checking that the process
+# behind it is this user (SO_PEERCRED).
+#
+# Where files land: /home/shabnam/Downloads, where the owner's file manager, the browser and the
+# player find them. That directory stays the browser user's; `start` gives it the group
+# shabnam-drop with group-write and setgid (2775), opens it and hands the open directory to the
+# daemon as descriptor 3 — the daemon cannot enter /home/shabnam (0700) and never looks a path up
+# through it. Received files are shabnam-drop:shabnam-drop 0644: readable by all, changeable only
+# by the daemon's user (the directory's owner can still rename or delete them, as with any of its
+# downloads). The daemon listens on the Wi-Fi interface's address only (TCP 53317 and the
+# discovery group, never usb0), never opens or runs what it receives, and accepts a transfer only
+# after the shell showed it and the owner clicked 接受 — unless 快速接收 is on.
 umask 022
-DROP_USER=shabnam
+DROP_USER=shabnam-drop
+DESKTOP_USER=shabnam
+RUNTIME=/run/shabnam-drop
 INTERFACE=${SHABNAM_DROP_IFACE:-wlan0}
 
-uid=$(id -u "$DROP_USER") || { echo "shabnam-drop: user $DROP_USER is missing" >&2; exit 1; }
-runtime=/run/user/$uid
+fail() { echo "shabnam-drop: $*" >&2; exit 1; }
 
 case ${1:-show} in
   show)
     exec shabnam-shell drop show ;;
   status)
-    if SHABNAM_DROP_UID=$uid shabnam-dropd ctl - 0 2>/dev/null; then echo on; else echo off; exit 1; fi ;;
+    if shabnam-dropd ctl - 0 >/dev/null 2>&1; then echo on; else echo off; exit 1; fi ;;
   stop)
-    SHABNAM_DROP_UID=$uid shabnam-dropd ctl '{"t":"quit"}' 1 >/dev/null 2>&1; exit 0 ;;
+    shabnam-dropd ctl '{"t":"quit"}' 1 >/dev/null 2>&1; exit 0 ;;
   start)
-    if [ "$(id -u)" = 0 ]; then
-      mkdir -p "$runtime" && chown "$DROP_USER:$DROP_USER" "$runtime" && chmod 700 "$runtime" || exit 1
-      home=$(getent passwd "$DROP_USER" | cut -d: -f6)
-      cd "$home" || exit 1
-      exec setpriv --reuid "$DROP_USER" --regid "$DROP_USER" --init-groups \
-        env -i HOME="$home" USER="$DROP_USER" LOGNAME="$DROP_USER" SHELL=/bin/sh \
-          PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-zh_CN.UTF-8}" ${TZ:+TZ="$TZ"} \
-          XDG_RUNTIME_DIR="$runtime" SHABNAM_DROP_IFACE="$INTERFACE" \
-          ${SHABNAM_DROP_LOG:+SHABNAM_DROP_LOG=1} \
-          /usr/local/bin/shabnam-dropd
-    fi
-    exec env SHABNAM_DROP_IFACE="$INTERFACE" /usr/local/bin/shabnam-dropd ;;
+    [ "$(id -u)" = 0 ] || fail "start: must be run by root (it drops to $DROP_USER itself)"
+    id -u "$DROP_USER" >/dev/null 2>&1 || fail "user $DROP_USER is missing (see the top of this script)"
+    state=$(getent passwd "$DROP_USER" | cut -d: -f6)
+    desktop_uid=$(id -u "$DESKTOP_USER") || fail "user $DESKTOP_USER is missing"
+    downloads=$(getent passwd "$DESKTOP_USER" | cut -d: -f6)/Downloads
+    case $state in /var/lib/*) ;; *) fail "unexpected home of $DROP_USER: $state" ;; esac
+    # Both are under root-owned directories: nobody else can have put something there.
+    for dir in "$RUNTIME" "$state"; do
+      mkdir -p "$dir" && chown "$DROP_USER:$DROP_USER" "$dir" && chmod 700 "$dir" || fail "cannot prepare $dir"
+    done
+    # The downloads directory is inside another user's home. Root does nothing to it by name:
+    # that user creates it if it is missing; then it is opened, and only the opened directory is
+    # checked and changed (through the descriptor), so a link or swap cannot redirect root.
+    [ -e "$downloads" ] || [ -L "$downloads" ] ||
+      setpriv --reuid "$DESKTOP_USER" --regid "$DESKTOP_USER" --init-groups mkdir -m 755 "$downloads"
+    [ -d "$downloads" ] && [ ! -L "$downloads" ] || fail "$downloads is not a directory"
+    exec 3<"$downloads" || fail "cannot open $downloads"
+    [ -d /proc/self/fd/3 ] && [ "$(stat -L -c %u /proc/self/fd/3)" = "$desktop_uid" ] ||
+      fail "$downloads does not belong to $DESKTOP_USER"
+    chgrp "$DROP_USER" /proc/self/fd/3 && chmod g+ws /proc/self/fd/3 || fail "cannot prepare $downloads"
+    cd / || exit 1
+    exec setpriv --reuid "$DROP_USER" --regid "$DROP_USER" --init-groups \
+      env -i HOME="$state" USER="$DROP_USER" LOGNAME="$DROP_USER" SHELL=/bin/sh \
+        PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-zh_CN.UTF-8}" ${TZ:+TZ="$TZ"} \
+        SHABNAM_DROP_IFACE="$INTERFACE" SHABNAM_DROP_DIR_FD=3 \
+        ${SHABNAM_DROP_LOG:+SHABNAM_DROP_LOG=1} \
+        /usr/local/bin/shabnam-dropd ;;
   *)
     echo "usage: shabnam-drop [start|stop|status]" >&2; exit 2 ;;
 esac

@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Files
+Name[zh_CN]=文件
+GenericName=File Manager
+GenericName[zh_CN]=文件管理器
+Comment=Browse and manage files
+Comment[zh_CN]=浏览和管理文件
+Exec=shabnam-files %U
+Icon=/usr/share/shabnam/icons/files.png
+Terminal=false
+StartupWMClass=favnyr
+Categories=System;FileManager;
+MimeType=inode/directory;

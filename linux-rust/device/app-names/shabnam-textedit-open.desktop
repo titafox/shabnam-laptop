@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=TextEdit (open file)
+Name[zh_CN]=文本编辑（打开文件）
+Comment=Opens a text file in Helix inside a terminal window; used by file associations, not shown in the launcher
+Exec=foot --app-id=Helix hx %F
+Icon=/usr/share/shabnam/icons/textedit.png
+Terminal=false
+NoDisplay=true
+Categories=Utility;TextEditor;
+MimeType=text/plain;text/markdown;text/x-log;text/x-csrc;text/x-chdr;text/x-c++src;text/x-python;text/x-shellscript;text/rust;text/x-toml;text/css;text/csv;text/xml;application/json;application/x-yaml;application/toml;application/x-shellscript;application/xml;application/x-desktop;

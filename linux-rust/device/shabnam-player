@@ -4,7 +4,7 @@
 #   shabnam-player film.mp4                 a file
 #   shabnam-player https://host/clip.mp4    a direct link (mp4, mkv, webm, m3u8, mpd …)
 #   shabnam-player https://site/watch?v=…   a page: yt-dlp finds the stream (H.264, at most 1080p) and its sound
-#   shabnam-player                          pick a file in the file manager first
+#   shabnam-player                          opens the file manager (shabnam-files) in the Videos folder
 #
 # The picture is decoded by the RK3568's hardware decoder (GStreamer element mppvideodec, from
 # libgstrockchipmpp.so), converted by the RGA hardware and shown by shabnam-video without the CPU touching pixels; see linux-rust/shabnam-video/main.c for
@@ -29,12 +29,11 @@ if [ "$(id -u)" = 0 ]; then
   target=$1
   title=
   if [ -z "$target" ]; then
-    # No file given (started from the launcher): choose one in the file manager.
-    pick=$(mktemp /run/shabnam-player-pick.XXXXXX) || exit 1
+    # No file given (started from the launcher): open the file manager in the Videos folder. A double
+    # click on a video there comes back here as "shabnam-player FILE" through the file association
+    # (/etc/xdg/mimeapps.list and shabnam-player.desktop's MimeType line).
     dir=${HOME:-/root}; [ -d "$dir/Videos" ] && dir=$dir/Videos
-    foot --app-id=shabnam-player-open --title='选择视频 · Videos' yazi --chooser-file="$pick" "$dir"
-    target=$(head -n 1 "$pick"); rm -f "$pick"
-    [ -n "$target" ] || exit 0
+    exec shabnam-files "$dir"
   fi
   case $target in
     *://*) ;;

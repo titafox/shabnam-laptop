@@ -37,7 +37,7 @@ Mac 端的设置窗口：
 
 - **桌面**：[niri](https://github.com/YaLTeR/niri) 合成器（打了适配 Mali 驱动的补丁）加自己写的
   `shabnam-shell`：底栏、启动器、快捷设置、音量和亮度提示。外观参考 ChromeOS 的布局和 macOS 的图标风格。
-- **应用**：Chromium 浏览器（网页视频硬件解码）、foot 终端加 fish、文件管理（yazi）、文本编辑（Helix）、硬件解码的视频播放器。
+- **应用**：Chromium 浏览器（网页视频硬件解码）、foot 终端加 fish、图形界面的文件管理器（Favnyr，Rust + Slint，自己编译；终端里另有 yazi）、文本编辑（Helix）、硬件解码的视频播放器。
 - **中文**：Noto CJK 字体，fcitx5 拼音输入法。
 - **系统**：Wi-Fi（wpa_supplicant，可在快捷设置里切换网络）、声音（PipeWire）、
   对时（ntpd-rs）、亮度和音量键、合盖关屏、关机和重启。
@@ -75,6 +75,7 @@ Mac 端的设置窗口：
 | `linux-rust/subscreen-rx/` | 副屏接收端：Rockchip MPP 硬解 H.264，直接用 KMS 显示，ALSA 播放，转发输入事件。另含开机画面程序 `shabnam-splash` |
 | `linux-rust/mac/ShabnamDisplay/` | Mac 菜单栏应用（Swift）：虚拟显示器、屏幕捕获、编码、声音、输入注入、设置窗口。有独立的 README 和协议文档 |
 | `linux-rust/shabnam-video/` | 视频播放器：GStreamer 加瑞芯微硬解插件（`mppvideodec`），解出的画面直接交给合成器，不经处理器拷贝。C，约 900 行 |
+| `linux-rust/files/` | 文件管理器 Favnyr 的交叉编译脚本（只有脚本，不含源码）；启动包装是 `device/shabnam-files`，文件类型关联在 `device/etc/xdg-mimeapps.list` |
 | `linux-rust/device/` | 装在笔记本上的脚本和配置：启动、会话、Wi-Fi、声音、浏览器包装、输入法、终端、niri 配置 |
 | `linux-rust/patches/` | niri 和 smithay 适配 Mali 驱动的补丁 |
 | `linux-rust/branding/` | 标志、壁纸、开机画面、应用图标 |

@@ -1,10 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Files
-Name[zh_CN]=文件
+Name=Files (terminal)
+Name[zh_CN]=文件（终端）
 Comment=File manager
 Exec=yazi %u
 Icon=/usr/share/shabnam/icons/files.png
 Terminal=true
 Categories=System;FileManager;
-MimeType=inode/directory;

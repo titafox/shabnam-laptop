@@ -13,7 +13,7 @@ Terminal=false
 StartupNotify=true
 StartupWMClass=shabnam-browser
 Categories=Network;WebBrowser;
-MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;application/pdf;image/png;image/jpeg;image/gif;image/webp;image/svg+xml;image/bmp;image/avif;
 Actions=new-window;new-private-window;
 
 [Desktop Action new-window]

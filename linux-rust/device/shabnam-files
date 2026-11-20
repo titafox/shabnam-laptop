@@ -1,0 +1,23 @@
+#!/bin/sh
+# shabnam-files [FOLDER | file:// URL]... — the Shabnam file manager, launcher name 「文件」.
+#
+# The program behind it is Favnyr (github.com/GlitchAwakened/Favnyr, Rust + Slint, GPL-3.0-or-later),
+# built by ../files/build.sh and installed as /usr/local/bin/favnyr. This wrapper only chooses how it draws
+# and its first-run language, so the launcher entry and shabnam-player keep working if the program changes.
+#
+# Drawing: Slint's CPU renderer (wl_shm buffers, the same route as shabnam-shell and foot). It needs nothing
+# from the Mali driver; on the laptop the window is up in under a second and uses about 50 MB. The GLES
+# renderer also starts on this driver (SHABNAM_FILES_BACKEND=winit-femtovg) but takes twice the time and memory.
+#
+# Opening a file: Favnyr hands it to xdg-open, which looks the type up in /etc/xdg/mimeapps.list
+# (../device/etc/xdg-mimeapps.list) and the .desktop files' MimeType lines; nothing is hard-coded here.
+umask 022
+export SLINT_BACKEND="${SHABNAM_FILES_BACKEND:-winit-software}"
+# First run only: Favnyr's own default language is English and it does not read LANG.
+cfg=${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/favnyr/config.toml
+if [ ! -e "$cfg" ]; then
+  case ${LC_ALL:-${LC_MESSAGES:-$LANG}} in
+    zh*) mkdir -p "${cfg%/*}" && echo 'language = "zh"' > "$cfg" ;;
+  esac
+fi
+exec favnyr "$@"

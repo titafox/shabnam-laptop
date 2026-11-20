@@ -1,0 +1,33 @@
+[package]
+name = "shabnam-drop"
+version = "0.1.0"
+edition = "2021"
+description = "隔空传送: file transfer with LocalSend-compatible devices on the home Wi-Fi. A receiving daemon (shabnam-dropd) that asks the desktop shell before it accepts anything, and a sender (shabnam-send). The protocol itself is the LocalSend project's own Rust core; see build.sh."
+
+# The protocol core is not in this repository: build.sh downloads the pinned commit of
+# github.com/localsend/localsend, checks its checksum, applies patches/ and links it here as upstream/.
+[dependencies]
+localsend = { path = "upstream/packages/core", features = ["crypto", "http", "multicast", "discovery"] }
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+bytes = "1"
+serde_json = "1"
+if-addrs = "0.15"
+pem = "4"
+libc = "0.2"
+tracing-subscriber = "0.3"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "shabnam-dropd"
+path = "src/bin/dropd.rs"
+
+[[bin]]
+name = "shabnam-send"
+path = "src/bin/send.rs"
+
+[profile.release]
+opt-level = 2
+strip = true

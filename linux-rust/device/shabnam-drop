@@ -1,0 +1,50 @@
+#!/bin/sh
+# shabnam-drop — 隔空传送: receive files from, and send files to, phones and computers on the home
+# Wi-Fi that run a LocalSend-compatible app. Launcher name 「隔空传送」.
+#
+#   shabnam-drop            show the switch (opens the shell's quick settings)
+#   shabnam-drop start      start receiving; stays in the foreground (the shell starts it detached
+#                           when the 「隔空传送」 switch in quick settings is turned on)
+#   shabnam-drop stop       stop receiving (closes the port)
+#   shabnam-drop status     prints "on" or "off"
+# Sending is a separate command: shabnam-send FILE...
+#
+# Receiving is OFF until the owner switches it on, and off again after every restart.
+#
+# Who it runs as: the desktop runs as root, a program that listens on the network must not. `start`
+# drops to the unprivileged user "shabnam" (uid 700, the browser's and the player's user) with an
+# empty environment and runs /usr/local/bin/shabnam-dropd (built by ../drop/build.sh). That daemon
+# listens on the Wi-Fi interface's address only (TCP 53317 and the discovery group, never usb0),
+# writes only into /home/shabnam/Downloads, never opens or runs what it receives, and accepts a
+# transfer only after the shell showed it and the owner clicked 接受 — unless 快速接收 is on.
+# The shell talks to it over /run/user/700/shabnam-drop.sock (directory mode 0700).
+umask 022
+DROP_USER=shabnam
+INTERFACE=${SHABNAM_DROP_IFACE:-wlan0}
+
+uid=$(id -u "$DROP_USER") || { echo "shabnam-drop: user $DROP_USER is missing" >&2; exit 1; }
+runtime=/run/user/$uid
+
+case ${1:-show} in
+  show)
+    exec shabnam-shell drop show ;;
+  status)
+    if SHABNAM_DROP_UID=$uid shabnam-dropd ctl - 0 2>/dev/null; then echo on; else echo off; exit 1; fi ;;
+  stop)
+    SHABNAM_DROP_UID=$uid shabnam-dropd ctl '{"t":"quit"}' 1 >/dev/null 2>&1; exit 0 ;;
+  start)
+    if [ "$(id -u)" = 0 ]; then
+      mkdir -p "$runtime" && chown "$DROP_USER:$DROP_USER" "$runtime" && chmod 700 "$runtime" || exit 1
+      home=$(getent passwd "$DROP_USER" | cut -d: -f6)
+      cd "$home" || exit 1
+      exec setpriv --reuid "$DROP_USER" --regid "$DROP_USER" --init-groups \
+        env -i HOME="$home" USER="$DROP_USER" LOGNAME="$DROP_USER" SHELL=/bin/sh \
+          PATH=/usr/local/bin:/usr/bin:/bin LANG="${LANG:-zh_CN.UTF-8}" ${TZ:+TZ="$TZ"} \
+          XDG_RUNTIME_DIR="$runtime" SHABNAM_DROP_IFACE="$INTERFACE" \
+          ${SHABNAM_DROP_LOG:+SHABNAM_DROP_LOG=1} \
+          /usr/local/bin/shabnam-dropd
+    fi
+    exec env SHABNAM_DROP_IFACE="$INTERFACE" /usr/local/bin/shabnam-dropd ;;
+  *)
+    echo "usage: shabnam-drop [start|stop|status]" >&2; exit 2 ;;
+esac

@@ -1,0 +1,18 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Nearby Share
+Name[en]=Nearby Share
+Name[zh_CN]=隔空传送
+Name[ru]=Передача файлов
+GenericName=File transfer over Wi-Fi
+GenericName[zh_CN]=局域网文件互传
+GenericName[ru]=Обмен файлами по Wi-Fi
+Comment=Receive files from phones and computers on the same Wi-Fi (compatible with LocalSend)
+Comment[zh_CN]=与同一 Wi-Fi 下的手机、电脑互传文件（兼容 LocalSend）
+Comment[ru]=Приём файлов с телефонов и компьютеров в той же сети Wi-Fi (совместимо с LocalSend)
+Keywords=localsend;share;send;receive;transfer;airdrop;传送;互传;发送;接收;передача;
+Exec=shabnam-drop
+Icon=/usr/share/shabnam/icons/drop.png
+Terminal=false
+Categories=Network;FileTransfer;

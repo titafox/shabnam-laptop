@@ -12,18 +12,22 @@
 //!   shabnam-shell quit             stop the running shell
 //!   shabnam-shell osd volume       show the volume indicator for a moment (for the volume keys)
 //!   shabnam-shell osd brightness   the same for the backlight
+//!   shabnam-shell drop on|off      switch 隔空传送 (receiving files over Wi-Fi) on or off
+//!   shabnam-shell drop show        open the quick panel, where its switch is
 //!
 //! For looking at states without touching mouse or keyboard (testing only):
 //!   shabnam-shell test-wifi                 quick panel showing the network list (starts a scan)
 //!   shabnam-shell test-wifi-password        the password form; its connect button does nothing
 //!   shabnam-shell test-menu APPID           the context menu of that app's shelf icon
 //!   shabnam-shell test-launcher-menu APPID  the launcher with the context menu of that app's entry
+//!   shabnam-shell test-drop offer|progress|done|text|refused   the 隔空传送 card with made-up content
 //!
 //! This file is the Wayland side: surfaces, buffers, input routing, the control socket, the niri
 //! event stream and the clock timer. What is shown and how it reacts lives in ui.rs.
 
 mod apps;
 mod draw;
+mod drop;
 mod icons;
 mod sys;
 mod ui;
@@ -81,7 +85,7 @@ use wayland_client::{
 const DEFAULT_PATH: &str = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin";
 const COMMANDS: [&str; 6] = ["toggle-launcher", "toggle-quick", "close", "quit", "test-wifi", "test-wifi-password"];
 /// Commands followed by one piece of text.
-const COMMANDS_WITH_TEXT: [&str; 4] = ["search", "osd", "test-menu", "test-launcher-menu"];
+const COMMANDS_WITH_TEXT: [&str; 6] = ["search", "osd", "test-menu", "test-launcher-menu", "drop", "test-drop"];
 /// How long the volume / brightness indicator stays after the last change.
 const OSD_TIME: Duration = Duration::from_millis(1500);
 
@@ -129,7 +133,7 @@ fn main() {
             return;
         }
         _ => {
-            eprintln!("usage: shabnam-shell [{}|search TEXT|osd volume|osd brightness|test-menu APPID|test-launcher-menu APPID]", COMMANDS.join("|"));
+            eprintln!("usage: shabnam-shell [{}|search TEXT|osd volume|osd brightness|drop on|drop off|drop show|test-menu APPID|test-launcher-menu APPID|test-drop KIND]", COMMANDS.join("|"));
             std::process::exit(2);
         }
     }
@@ -203,6 +207,8 @@ struct Shell {
     osd_until: Instant,
     /// Where the threads that read the volume or brightness hand in what they found.
     osd_values: channel::Sender<(OsdKind, u32)>,
+    /// The 隔空传送 card while there is something to show.
+    notice: Option<Surf>,
     /// Buffer scale used when fractional scaling is not available.
     int_scale: i32,
     keyboard: Option<wl_keyboard::WlKeyboard>,
@@ -249,6 +255,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         osd: None,
         osd_until: Instant::now(),
         osd_values,
+        notice: None,
         int_scale: 1,
         keyboard: None,
         pointer: None,
@@ -308,6 +315,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     shell.ui.test_launcher_menu(command["test-launcher-menu ".len()..].trim());
                 }
+                "drop on" => shell.ui.drop_set(true),
+                "drop off" => shell.ui.drop_set(false),
+                "drop show" => {
+                    if shell.ui.open != Some(Panel::Quick) {
+                        shell.open(Panel::Quick);
+                    }
+                }
+                command if command.starts_with("test-drop ") => shell.ui.test_drop(command["test-drop ".len()..].trim()),
                 "close" => shell.close_panel(),
                 "quit" => shell.exit = true,
                 _ => {}
@@ -363,6 +378,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     })?;
 
+    // 隔空传送: the worker thread that talks to the receiver reports the same way.
+    let (drop_events, drop_source) = channel::channel::<drop::Event>();
+    shell.ui.set_drop(drop::start(move |event| {
+        let _ = drop_events.send(event);
+    }));
+    event_loop.handle().insert_source(drop_source, |event, _, shell| {
+        if let channel::Event::Msg(event) = event {
+            shell.ui.drop_event(event);
+        }
+    })?;
+    // Its notices go away by themselves after a while.
+    event_loop.handle().insert_source(Timer::from_duration(Duration::from_secs(1)), |_, _, shell| {
+        shell.ui.drop_tick();
+        TimeoutAction::ToDuration(Duration::from_secs(1))
+    })?;
+
     // Clock, battery, network.
     let first = shell.ui.tick();
     event_loop.handle().insert_source(Timer::from_duration(first), |_, _, shell| TimeoutAction::ToDuration(shell.ui.tick()))?;
@@ -377,6 +408,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         if shell.ui.dirty_osd {
             shell.draw(Where::Osd);
+        }
+        shell.sync_notice();
+        if shell.ui.dirty_notice {
+            shell.draw(Where::Notice);
         }
     }
     if let Ok(path) = socket_path() {
@@ -433,6 +468,17 @@ fn new_surf(
             }
             bytes = (ui::OSD_SIZE.0 * 2 * ui::OSD_SIZE.1 * 2 * 4) as usize;
         }
+        // The 隔空传送 card: above the right end of the shelf. It takes clicks (its buttons) but
+        // never the keyboard, so it cannot swallow what the owner is typing when it appears.
+        Where::Notice => {
+            layer = layer_shell.create_layer_surface(qh, surface, Layer::Overlay, Some("shabnam-notice"), None);
+            layer.set_anchor(Anchor::BOTTOM | Anchor::RIGHT);
+            layer.set_size(ui::NOTICE_SIZE.0, ui::NOTICE_SIZE.1);
+            layer.set_margin(0, 10, 8, 0);
+            layer.set_exclusive_zone(0);
+            layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+            bytes = (ui::NOTICE_SIZE.0 * 2 * ui::NOTICE_SIZE.1 * 2 * 4) as usize;
+        }
     }
     layer.commit();
     Ok(Surf {
@@ -456,6 +502,8 @@ impl Shell {
             Some(Where::Panel)
         } else if self.osd.as_ref().is_some_and(|p| p.layer.wl_surface() == surface) {
             Some(Where::Osd)
+        } else if self.notice.as_ref().is_some_and(|p| p.layer.wl_surface() == surface) {
+            Some(Where::Notice)
         } else {
             None
         }
@@ -466,6 +514,29 @@ impl Shell {
             Where::Shelf => Some(&mut self.shelf),
             Where::Panel => self.panel.as_mut(),
             Where::Osd => self.osd.as_mut(),
+            Where::Notice => self.notice.as_mut(),
+        }
+    }
+
+    /// Creates the 隔空传送 card's surface when there is something to show, removes it when not.
+    fn sync_notice(&mut self) {
+        match (self.ui.notice_wanted(), self.notice.is_some()) {
+            (true, false) => {
+                match new_surf(&self.compositor, &self.layer_shell, &self.shm, &self.viewporter, &self.fractional_manager, &self.qh, Where::Notice) {
+                    Ok(mut surf) => {
+                        surf.scale120 = self.shelf.scale120;
+                        self.notice = Some(surf);
+                    }
+                    Err(e) => eprintln!("shabnam-shell: cannot show the notice: {e}"),
+                }
+            }
+            (false, true) => {
+                if let Some(surf) = self.notice.take() {
+                    surf.destroy();
+                }
+                self.ui.dirty_notice = false;
+            }
+            _ => {}
         }
     }
 
@@ -544,8 +615,13 @@ impl Shell {
     }
 
     fn draw(&mut self, place: Where) {
-        let Shell { shelf, panel, osd, ui, int_scale, qh, .. } = self;
+        if place == Where::Notice && self.notice.is_none() {
+            self.ui.dirty_notice = false;
+            return;
+        }
+        let Shell { shelf, panel, osd, notice, ui, int_scale, qh, .. } = self;
         let surf = match (place, panel, osd) {
+            (Where::Notice, _, _) => notice.as_mut().unwrap(),
             (Where::Shelf, _, _) => shelf,
             (Where::Panel, Some(panel), _) => panel,
             (Where::Osd, _, Some(osd)) => osd,
@@ -573,6 +649,7 @@ impl Shell {
             Where::Shelf => ui.draw_shelf(&mut canvas),
             Where::Panel => ui.draw_panel(&mut canvas),
             Where::Osd => ui.draw_osd(&mut canvas),
+            Where::Notice => ui.draw_notice(&mut canvas),
         }
         let surface = surf.layer.wl_surface();
         match &surf.viewport {
@@ -592,6 +669,7 @@ impl Shell {
             Where::Shelf => self.ui.dirty_shelf = true,
             Where::Panel => self.ui.dirty_panel = self.panel.is_some(),
             Where::Osd => self.ui.dirty_osd = self.osd.is_some(),
+            Where::Notice => self.ui.dirty_notice = self.notice.is_some(),
         }
     }
 
@@ -684,6 +762,12 @@ impl LayerShellHandler for Shell {
                     surf.destroy();
                 }
             }
+            // sync_notice makes a new one while there is still something to show.
+            Some(Where::Notice) => {
+                if let Some(surf) = self.notice.take() {
+                    surf.destroy();
+                }
+            }
             None => {}
         }
     }
@@ -695,6 +779,7 @@ impl LayerShellHandler for Shell {
             Where::Shelf => (if width == 0 { 1280 } else { width }, ui::SHELF_H as u32),
             Where::Panel => (if width == 0 { 1280 } else { width }, if height == 0 { 668 } else { height }),
             Where::Osd => ui::OSD_SIZE,
+            Where::Notice => ui::NOTICE_SIZE,
         };
         if let Some(surf) = self.surf_mut(place) {
             surf.size = size;
@@ -704,6 +789,7 @@ impl LayerShellHandler for Shell {
             Where::Shelf => self.ui.set_shelf_width(size.0 as f32),
             Where::Panel => self.ui.set_panel_size(size.0 as f32, size.1 as f32),
             Where::Osd => self.ui.dirty_osd = true,
+            Where::Notice => self.ui.dirty_notice = true,
         }
     }
 }

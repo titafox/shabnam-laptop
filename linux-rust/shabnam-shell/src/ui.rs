@@ -10,6 +10,10 @@ use crate::wifi::{self, Security};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
 
+#[path = "drop_ui.rs"]
+mod drop_ui;
+pub use drop_ui::NOTICE_SIZE;
+
 // Theme (the dark theme of the Android original, with Shabnam teal as the accent).
 const PANEL: Color = argb(0xF2202124);
 const TEXT: Color = argb(0xFFE8EAED);
@@ -65,6 +69,8 @@ pub enum Where {
     Panel,
     /// The volume / brightness indicator.
     Osd,
+    /// The 隔空传送 card (incoming transfer, arrival).
+    Notice,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -168,6 +174,9 @@ enum QuickHit {
     Mute,
     Poweroff,
     Reboot,
+    /// The 隔空传送 switch and its "quick receive" switch.
+    Drop,
+    DropQuick,
 }
 
 impl QuickHit {
@@ -282,6 +291,8 @@ struct QuickLayout {
     rect: Rect,
     wifi: Rect,
     mac: Rect,
+    drop: Rect,
+    drop_quick: Option<Rect>,
     poweroff: Rect,
     reboot: Rect,
     brightness: Option<Rect>,
@@ -345,6 +356,10 @@ pub struct Ui {
 
     /// What the indicator shows: which value and its percentage.
     osd: Option<(OsdKind, u32)>,
+
+    /// 隔空传送: the receiver's state and the notice card (drop_ui.rs).
+    drop: drop_ui::DropUi,
+    pub dirty_notice: bool,
 
     pub dirty_shelf: bool,
     pub dirty_panel: bool,
@@ -426,6 +441,8 @@ impl Ui {
             menu: None,
             menu_request: None,
             osd: None,
+            drop: drop_ui::DropUi::default(),
+            dirty_notice: false,
             dirty_shelf: true,
             dirty_panel: false,
             dirty_osd: false,
@@ -1062,12 +1079,19 @@ impl Ui {
         let (pw, ph) = self.panel_size;
         let width = 384.0f32.min(pw - 20.0);
         let sliders = self.brightness.is_some() as u32 + self.volume.is_some() as u32;
-        let height = 14.0 + 34.0 + 10.0 + 48.0 + 10.0 + sliders as f32 * 40.0 + 6.0 + 40.0 + 15.0 + 24.0 + 10.0;
+        let height = 14.0 + 34.0 + 10.0 + 48.0 + 10.0 + 48.0 + 10.0 + sliders as f32 * 40.0 + 6.0 + 40.0 + 15.0 + 24.0 + 10.0;
         let (x, y) = (pw - 10.0 - width, ph - 8.0 - height);
         let (left, inner) = (x + 14.0, width - 28.0);
         let pills_y = y + 14.0 + 34.0 + 10.0;
         let half = (inner - 8.0) / 2.0;
-        let mut row_y = pills_y + 48.0 + 10.0;
+        // 隔空传送: one wide switch; while it is on, "quick receive" takes the right half.
+        let drop_y = pills_y + 48.0 + 10.0;
+        let (drop, drop_quick) = if self.drop_quick_shown() {
+            ((left, drop_y, half, 48.0), Some((left + half + 8.0, drop_y, half, 48.0)))
+        } else {
+            ((left, drop_y, inner, 48.0), None)
+        };
+        let mut row_y = drop_y + 48.0 + 10.0;
         let mut brightness = None;
         if self.brightness.is_some() {
             brightness = Some((left + 62.0, row_y, inner - 62.0, 40.0));
@@ -1086,6 +1110,8 @@ impl Ui {
             rect: (x, y, width, height),
             wifi: (left, pills_y, half, 48.0),
             mac: (left + half + 8.0, pills_y, half, 48.0),
+            drop,
+            drop_quick,
             poweroff: (left, power_y, half, 40.0),
             reboot: (left + half + 8.0, power_y, half, 40.0),
             brightness,
@@ -1101,6 +1127,10 @@ impl Ui {
             Some(QuickHit::Wifi)
         } else if inside(layout.mac, x, y) {
             Some(QuickHit::Mac)
+        } else if inside(layout.drop, x, y) {
+            Some(QuickHit::Drop)
+        } else if layout.drop_quick.is_some_and(|r| inside(r, x, y)) {
+            Some(QuickHit::DropQuick)
         } else if inside(layout.poweroff, x, y) {
             Some(QuickHit::Poweroff)
         } else if inside(layout.reboot, x, y) {
@@ -1163,6 +1193,8 @@ impl Ui {
                 self.dirty_panel = true;
             }
             (Some(QuickHit::Wifi), _) => self.show_wifi(),
+            (Some(QuickHit::Drop), _) => self.drop_tile_click(),
+            (Some(QuickHit::DropQuick), _) => self.drop_quick_click(),
             (Some(button), Some(mode)) => {
                 if self.armed == Some(button) {
                     if let Err(e) = sys::spawn(&["/bin/sh", "-c", &end_session_command(mode)]) {
@@ -1263,6 +1295,8 @@ impl Ui {
             self.pill(c, layout.mac, title, sub, CHIP, TEXT, TEXT2, hover);
         }
 
+        self.draw_drop_row(c, &layout);
+
         // Sliders.
         if let (Some(track), Some(percent)) = (layout.brightness, self.brightness) {
             let min = sys::MIN_BRIGHTNESS as f32;
@@ -1331,6 +1365,7 @@ impl Ui {
                     self.dirty_panel = true;
                 }
             }
+            (Where::Notice, _) => self.notice_move(x, y),
             (Where::Panel, Some(Panel::Quick)) if self.quick_view != QuickView::Main => {
                 let hit = self.wifi_hit(x, y);
                 if hit != self.wifi.hover {
@@ -1372,6 +1407,7 @@ impl Ui {
                 }
             }
             Where::Osd => {}
+            Where::Notice => self.notice_leave(),
             Where::Panel => {
                 let menu_hover = self.menu.as_mut().and_then(|m| m.hover.take());
                 if self.quick_hover.take().is_some() || self.armed.take().is_some() || self.wifi.hover.take().is_some() || menu_hover.is_some() {
@@ -1384,6 +1420,12 @@ impl Ui {
     pub fn press(&mut self, place: Where, x: f32, y: f32, button: u32) -> Act {
         match (place, self.open) {
             (Where::Shelf, _) => self.shelf_click(x, y, button),
+            (Where::Notice, _) => {
+                if button == BTN_LEFT {
+                    self.notice_press(x, y);
+                }
+                Act::None
+            }
             (Where::Panel, Some(_)) if self.menu.is_some() => self.menu_press(x, y, button),
             (Where::Panel, Some(Panel::Menu)) => Act::Close,
             (Where::Panel, Some(Panel::Launcher)) => {

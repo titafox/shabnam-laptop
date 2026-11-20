@@ -31,7 +31,7 @@ enum SettingsTab: String, CaseIterable {
     var height: CGFloat {
         switch self {
         case .general: return 330
-        case .display: return 430
+        case .display: return 665
         case .audio: return 330
         case .input: return 520
         case .connection: return 680

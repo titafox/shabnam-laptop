@@ -49,6 +49,8 @@ The menu is short on purpose:
 |------|--------------|
 | Status line | `Waiting for laptop`, `Connected · 1080p · 60 fps · 42 Mbit/s`, or `Error: …` |
 | Connect / Disconnect | Stop or resume looking for the laptop, for this run |
+| Laptop battery, brightness, volume, mute | The laptop's own state and controls, e.g. `Shabnam 82% · charging` — shown while connected to a laptop whose receiver offers the control channel (subscreen-rx 0.2+) |
+| Return Shabnam to its own desktop | Ends second-screen mode on the laptop, as its Win+Esc does |
 | Sound | Where the Mac's sound is heard — see [Sound modes](#sound-modes) |
 | Resolution | How large the desktop appears on the laptop |
 | Settings… (⌘,) | Everything else |
@@ -59,7 +61,7 @@ in the app's defaults domain.
 | Pane | Contents |
 |------|----------|
 | General | Launch at login · connect automatically · icon only or icon and bitrate in the menu bar · notifications on connect/disconnect (off by default) |
-| Display | Resolution: 1920 × 1080 HiDPI (default), 1920 × 1080, 1600 × 900 HiDPI, 1280 × 720 HiDPI · frame rate cap 60/30 · picture quality · show the Mac's pointer · Arrange Displays… |
+| Display | Shabnam laptop: battery, brightness, volume, mute, return to its own desktop (greyed out without the control channel) · Resolution: 1920 × 1080 HiDPI (default), 1920 × 1080, 1600 × 900 HiDPI, 1280 × 720 HiDPI · frame rate cap 60/30 · picture quality · show the Mac's pointer · Arrange Displays… |
 | Sound | The three [sound modes](#sound-modes) |
 | Input | Accept the laptop's keyboard and touchpad (off: events are read and discarded) · Win/Alt mapping · media keys · pointer speed · scroll speed · reverse scroll direction |
 | Connection | Laptop address and port · the cable interface in use · pairing key (reveal, import, generate) · live statistics · Copy Diagnostics |
@@ -105,7 +107,7 @@ The interface is in English and Simplified Chinese.
 make app          # release build + "build/Shabnam Display.app" (signed, see below)
 make run          # build and launch
 make install      # copy the app to ~/Applications
-swift test        # handshake, settings, input mapping, presets, diagnostics
+swift test        # handshake, control channel codec and state, settings, input mapping, presets, diagnostics
 make check        # tests + every UI string present in both languages
 ```
 
@@ -124,6 +126,7 @@ APP="build/Shabnam Display.app/Contents/MacOS/ShabnamDisplay"
                                  # connection, permissions, about): connects to nothing, creates
                                  # no display, leaves a running copy alone, and keeps its settings
                                  # in a scratch domain
+"$APP" --ui-preview display --fake-laptop   # the same, with made-up figures in the laptop's controls
 "$APP" --probe-display-modes     # create a short-lived test display and report which of the
                                  # resolution choices macOS accepts
 ```
@@ -245,7 +248,7 @@ never displays or logs the key, and the key file must never be committed anywher
 
 All settings are stored in the app's defaults domain (`org.shabnam.display`) and can be
 inspected with `defaults read org.shabnam.display`. The laptop's address and port (default
-`169.254.1.1`, `7000`; sound is port + 1) are under Settings → Connection.
+`169.254.1.1`, `7000`; sound is port + 1, control port + 2) are under Settings → Connection.
 
 The project's web address for the About pane is a single constant, `ProjectInfo.homepage` in
 `Sources/ShabnamDisplay/Support/ProjectInfo.swift` (unset by default).
@@ -293,14 +296,17 @@ Sources/ShabnamAudio/              system audio tap ("Shabnam only" sound mode)
 Sources/audio-tap-probe/           diagnostic for the tap
 Sources/ShabnamDisplay/
   App/        main, AppDelegate, status item and menu, session state machine and statistics,
-              Settings window (SettingsUI/ holds one SwiftUI view per pane)
-  Link/       cable interface lookup, pairing key file, handshake, authenticated socket
+              the laptop's controls (LaptopControl), Settings window (SettingsUI/ holds one
+              SwiftUI view per pane)
+  Link/       cable interface lookup, pairing key file, handshake, authenticated socket,
+              control channel wire format
   Display/    virtual display
   Media/      screen capture, H.264 encoder + Annex-B framing, sound sender and sound modes
   Input/      Linux → macOS key tables, event injection
   Support/    settings, permissions, login item, notifications, diagnostics, localisation,
               logging, project facts
-Tests/ShabnamDisplayTests/         handshake against a reference receiver; settings and
+Tests/ShabnamDisplayTests/         handshake against a reference receiver; control channel
+                                   messages and UI state; settings and
                                    migration; modifier mapping; presets; diagnostics; log rotation
 docs/PROTOCOL.md                   wire format
 ```
@@ -313,6 +319,9 @@ docs/PROTOCOL.md                   wire format
   sockets are bound to that interface; do not route it over a shared network.
 - A paired laptop can type and click on the Mac — that is the feature. Treat the key file like
   a password.
+- The control channel uses the same handshake and the same cable-only sockets. What the Mac can
+  make the laptop do is a fixed list — backlight, volume, mute, leave second-screen mode — each
+  carrying at most one clamped number.
 
 ## Licence
 

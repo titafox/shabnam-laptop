@@ -3,9 +3,12 @@
 //! No compositor, no copies: the decoder's buffer is the buffer the display scans out.
 //! The laptop's keyboard and touchpad events travel back to the sender on the same connection.
 //!
+//! A third port lets the sender adjust backlight and volume and read the battery (control.rs).
+//!
 //! usage: subscreen-rx [--bind 169.254.1.1] [--iface usb0] [--port 7000] [--key /root/subscreen.key] [--hevc] [--connector 348] [--crtc 87] [--plane 229] [--primary 73]
 mod audio;
 mod auth;
+mod control;
 mod drm;
 mod input;
 mod mpp;
@@ -68,15 +71,17 @@ fn main() {
     // interface, so a machine on the Wi-Fi could still reach these ports by routing to them — and
     // whoever connects receives the keyboard. Tie the sockets to the USB network interface itself.
     let iface = args.iter().position(|x| x == "--iface").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "usb0".into());
-    let listen = |port: u16| {
-        let l = TcpListener::bind((bind.as_str(), port)).expect("bind");
+    let try_listen = |port: u16| -> std::io::Result<TcpListener> {
+        let l = TcpListener::bind((bind.as_str(), port))?;
         let r = unsafe {
             use std::os::fd::AsRawFd;
             libc::setsockopt(l.as_raw_fd(), libc::SOL_SOCKET, libc::SO_BINDTODEVICE, iface.as_ptr() as *const c_void, iface.len() as u32)
         };
-        assert_eq!(r, 0, "cannot restrict the listener to interface {iface}: {}", std::io::Error::last_os_error());
-        l
+        // A listener that could not be tied to the cable is not used at all.
+        if r != 0 { return Err(std::io::Error::last_os_error()); }
+        Ok(l)
     };
+    let listen = |port: u16| try_listen(port).unwrap_or_else(|e| panic!("cannot listen on {bind}:{port}, restricted to interface {iface}: {e}"));
     let listener = listen(port as u16);
     let sound = listen(port as u16 + 1);
     let key_path = args.iter().position(|x| x == "--key").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| "/root/subscreen.key".into());
@@ -84,6 +89,15 @@ fn main() {
     let sound_key = key.clone();
     std::thread::spawn(move || audio::serve(sound, &sound_key));
     eprintln!("listening on {bind}:{port} (video, input) and :{} (sound), {iface} only", port + 1);
+    // The control channel is an extra: if its port cannot be had, picture and sound still work.
+    match try_listen(port as u16 + 2) {
+        Ok(l) => {
+            let control_key = key.clone();
+            std::thread::spawn(move || control::serve(l, control_key));
+            eprintln!("listening on :{} (control), {iface} only", port + 2);
+        }
+        Err(e) => eprintln!("control channel unavailable: {e}"),
+    }
     input::led("blue", false);
     let sink: input::Sink = Arc::new(Mutex::new(None));
     input::start(sink.clone());
@@ -127,12 +141,21 @@ fn main() {
         let (a2, s2) = (alive.clone(), slot.clone());
         let dropped = Arc::new(AtomicU64::new(0));
         let d2 = dropped.clone();
+        let b2 = bytes.clone();
         let getter = std::thread::spawn(move || {
             let dec = dec;
             let mut idle = 0;
+            // Content meter: measurement only, see content.rs. The decoder call below returns at
+            // least every 100 ms, so the summary also appears while no frames arrive.
+            let mut meter = subscreen_rx::content::Meter::default();
+            let (mut window, mut last_frame, mut last_bytes) = (Instant::now(), Instant::now(), 0u64);
             loop {
                 let mut f = null_mut();
                 let r = unsafe { ((*dec.api).decode_get_frame)(dec.ctx, &mut f) };
+                if window.elapsed() >= Duration::from_secs(10) {
+                    eprintln!("{}", meter.take(window.elapsed().as_secs_f64()));
+                    window = Instant::now();
+                }
                 if r != 0 || f.is_null() {
                     if !a2.load(Ordering::Relaxed) { idle += 1; if idle > 3 { break; } }
                     continue;
@@ -148,6 +171,9 @@ fn main() {
                     }
                     if mpp::mpp_frame_get_buffer(f).is_null() || mpp::mpp_frame_get_discard(f) != 0 || mpp::mpp_frame_get_errinfo(f) != 0 { continue; }
                 }
+                let (now, received) = (Instant::now(), b2.load(Ordering::Relaxed));
+                meter.frame(now.duration_since(last_frame).as_micros() as u64, received - last_bytes);
+                (last_frame, last_bytes) = (now, received);
                 let (m, cv) = &*s2;
                 if m.lock().unwrap().replace(frame).is_some() { d2.fetch_add(1, Ordering::Relaxed); }
                 cv.notify_one();

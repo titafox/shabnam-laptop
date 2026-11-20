@@ -9,6 +9,8 @@ final class AppModel: ObservableObject {
     /// nil in the UI preview, where nothing is ever connected.
     let session: SessionController?
     let settings: Settings
+    /// The laptop's own controls. In the UI preview it is connected to nothing.
+    let laptopControl: LaptopControl
 
     @Published var state: LinkState = .stopped
     @Published var stats = SessionStats.Snapshot()
@@ -17,12 +19,16 @@ final class AppModel: ObservableObject {
     @Published var loginItemEnabled = false
     @Published var cable: CableInterface?
     @Published var keyFile = KeyFileStatus.missing
+    /// nil while the laptop offers no control channel (not connected, or an older receiver).
+    @Published var laptop: LaptopStatus?
 
     private var timer: Timer?
 
     init(session: SessionController?, settings: Settings = .shared) {
         self.session = session
         self.settings = settings
+        laptopControl = session?.laptop ?? LaptopControl()
+        laptop = laptopControl.status
         refresh()
     }
 
@@ -64,7 +70,7 @@ final class AppModel: ObservableObject {
     }
 
     var diagnostics: String {
-        Diagnostics.report(state: state, stats: stats, settings: settings, cable: cable)
+        Diagnostics.report(state: state, stats: stats, settings: settings, cable: cable, laptop: laptop)
     }
 }
 

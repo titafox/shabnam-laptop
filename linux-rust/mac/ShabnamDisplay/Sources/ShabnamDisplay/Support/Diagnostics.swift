@@ -15,7 +15,7 @@ enum Diagnostics {
         return out
     }
 
-    static func report(state: LinkState, stats: SessionStats.Snapshot, settings: Settings, cable: CableInterface?) -> String {
+    static func report(state: LinkState, stats: SessionStats.Snapshot, settings: Settings, cable: CableInterface?, laptop: LaptopStatus? = nil) -> String {
         let os = ProcessInfo.processInfo.operatingSystemVersion
         var lines: [String] = []
         lines.append("\(ProjectInfo.name) \(ProjectInfo.version) (\(ProjectInfo.build))")
@@ -31,6 +31,13 @@ enum Diagnostics {
                             settings.acceptInput ? "accepted" : "ignored", input.swapWinAlt ? "swapped" : "default",
                             input.reverseScroll ? "reversed" : "normal", input.scrollSpeed, input.pointerSpeed, input.mediaKeys ? "on" : "off"))
         lines.append("laptop: \(settings.host):\(settings.port), cable interface: \(cable.map { "\($0.name) (\($0.address))" } ?? "none")")
+        if let laptop {
+            let battery = laptop.battery.map { "\($0)%\(laptop.charging ? " charging" : laptop.externalPower ? " on charger" : "")" } ?? "none"
+            let lid = laptop.lidClosed.map { $0 ? "closed" : "open" } ?? "unknown"
+            lines.append("laptop control: receiver \(laptop.receiverVersion), protocol \(laptop.protocolVersion), brightness \(laptop.brightness)%, volume \(laptop.volume)/\(laptop.volumeSteps)\(laptop.muted ? " muted" : ""), battery \(battery), lid \(lid)")
+        } else {
+            lines.append("laptop control: not available")
+        }
         lines.append("permissions: screen recording \(Permissions.screenRecordingGranted ? "granted" : "missing"), accessibility \(Permissions.accessibilityGranted ? "granted" : "missing")")
         lines.append("pairing key file: \(!PairingKey.exists ? "missing" : PairingKey.load() == nil ? "too short" : PairingKey.isPrivate ? "present" : "present, readable by others")")
         return redact(lines.joined(separator: "\n"))

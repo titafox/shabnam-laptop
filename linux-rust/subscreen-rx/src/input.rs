@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub type Sink = Arc<Mutex<Option<TcpStream>>>;
@@ -31,6 +31,21 @@ static CAPS: AtomicBool = AtomicBool::new(false);
 static CTRL: AtomicBool = AtomicBool::new(false);
 static ALT: AtomicBool = AtomicBool::new(false);
 static META: AtomicBool = AtomicBool::new(false);
+/// 0 = the lid sensor has not reported yet, 1 = open, 2 = closed.
+static LID: AtomicU8 = AtomicU8::new(0);
+
+/// Whether the lid is closed, once the sensor has said so.
+pub fn lid_closed() -> Option<bool> {
+    match LID.load(Ordering::Relaxed) { 0 => None, v => Some(v == 2) }
+}
+
+/// Ends second-screen mode: the program exits and the session script brings the desktop back.
+/// Used by Win+Esc on the laptop and by the sender's request on the control channel.
+pub fn leave() -> ! {
+    led("blue", false);
+    audio::route("OFF");
+    std::process::exit(0);
+}
 
 fn read_num(path: &str) -> i32 { fs::read_to_string(path).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0) }
 fn write(path: &str, v: impl ToString) { let _ = fs::write(path, v.to_string()); }
@@ -64,13 +79,11 @@ fn handle_locally(code: u16, value: i32) -> bool {
         // macOS has no Command+Esc shortcut, so nothing is taken away from the Mac.
         // Ctrl+Alt+Esc does the same. The session script then brings the desktop back.
         1 if value == 1 && (META.load(Ordering::Relaxed) || (CTRL.load(Ordering::Relaxed) && ALT.load(Ordering::Relaxed))) => {
-            led("blue", false);
-            audio::route("OFF");
-            std::process::exit(0);
+            leave();
         }
         KEY_BRIGHTNESSUP | KEY_BRIGHTNESSDOWN => { if value != 0 { brightness_step(code == KEY_BRIGHTNESSUP); } true }
-        KEY_SLEEP => { if value == 1 { write(&format!("{BACKLIGHT}/bl_power"), 4); } true }
-        KEY_WAKEUP => { if value == 1 { write(&format!("{BACKLIGHT}/bl_power"), 0); } true }
+        KEY_SLEEP => { if value == 1 { LID.store(2, Ordering::Relaxed); write(&format!("{BACKLIGHT}/bl_power"), 4); } true }
+        KEY_WAKEUP => { if value == 1 { LID.store(1, Ordering::Relaxed); write(&format!("{BACKLIGHT}/bl_power"), 0); } true }
         // Sound comes out of this laptop's speakers, so its volume keys act here, not on the sender.
         KEY_VOLUMEUP | KEY_VOLUMEDOWN => {
             if value != 0 {

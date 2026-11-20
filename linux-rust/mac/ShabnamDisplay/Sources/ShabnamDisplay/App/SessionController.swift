@@ -46,6 +46,8 @@ final class SessionController {
     var onStateChange: ((LinkState) -> Void)?
     private(set) var state: LinkState = .stopped // main thread only
     let stats = SessionStats()
+    /// Brightness, volume and battery of the laptop, where its receiver offers them.
+    let laptop = LaptopControl()
 
     private let settings: Settings
     private let condition = NSCondition()
@@ -319,6 +321,30 @@ final class SessionController {
         soundThread.name = "sound-link"
         soundThread.start()
 
+        // So does the control connection (brightness, volume, battery). A receiver without it
+        // refuses the connection; that is not an error, and it is tried again now and then.
+        let controlPort = settings.port &+ ControlProtocol.portOffset
+        let controlThread = Thread { [laptop, condition] in
+            var explained = false
+            while link.isUp {
+                switch Link.open(host: host, port: controlPort, key: key) {
+                case .success(let control):
+                    log("laptop control connected")
+                    explained = false
+                    laptop.serve(control, while: { link.isUp })
+                    control.close()
+                case .failure:
+                    if !explained { log("laptop control not available (the receiver may be an older version)") }
+                    explained = true
+                }
+                condition.lock()
+                if link.isUp { condition.wait(until: Date().addingTimeInterval(5)) }
+                condition.unlock()
+            }
+        }
+        controlThread.name = "control-link"
+        controlThread.start()
+
         let interval = 1.0
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         timer.schedule(deadline: .now() + interval, repeating: interval)
@@ -351,6 +377,7 @@ final class SessionController {
         }
         route.finish() // first of all: if the Mac was muted for the laptop, its own sound comes back now
         injector.releaseAll() // let go of anything still held so nothing stays stuck down
+        laptop.disconnect() // the video link is down, so the control thread will not open another
 
         condition.lock()
         condition.broadcast() // wake the sound thread so it sees the link is down

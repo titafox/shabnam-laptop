@@ -1,10 +1,12 @@
 import SwiftUI
 
 struct DisplayPane: View {
+    @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var settings: Settings
 
     var body: some View {
         Form {
+            laptopSection
             Section {
                 Picker(L("Resolution"), selection: $settings.displayMode) {
                     ForEach(DisplayMode.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -29,6 +31,49 @@ struct DisplayPane: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+extension DisplayPane {
+    /// The laptop's own backlight, volume and battery, over the control channel.
+    private var laptopSection: some View {
+        let laptop = model.laptop
+        let control = model.laptopControl
+        return Section(L("Shabnam laptop")) {
+            LabeledContent(L("Battery"), value: laptop.map { $0.batteryText ?? L("No battery reported") } ?? "—")
+            Slider(value: Binding(get: { Double(laptop?.brightness ?? 0) }, set: { control.setBrightness(Int($0.rounded())) }), in: 0...100) {
+                Text(L("Brightness"))
+            } minimumValueLabel: {
+                Image(systemName: "sun.min")
+            } maximumValueLabel: {
+                Image(systemName: "sun.max")
+            }
+            Slider(value: Binding(get: { Double(laptop?.volume ?? 0) }, set: { control.setVolume(Int($0.rounded())) }),
+                   in: 0...Double(laptop?.volumeSteps ?? 16), step: 1) {
+                Text(L("Volume"))
+            } minimumValueLabel: {
+                Image(systemName: "speaker")
+            } maximumValueLabel: {
+                Image(systemName: "speaker.wave.3")
+            }
+            Toggle(L("Mute Shabnam"), isOn: Binding(get: { laptop?.muted ?? false }, set: { control.setMuted($0) }))
+            HStack {
+                Button(L("Return Shabnam to its own desktop")) { control.returnToDesktop() }
+                Spacer()
+                if let laptop {
+                    Text(L("Receiver %@", laptop.receiverVersion) + (laptop.lidClosed == true ? " · " + L("lid closed") : ""))
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            if laptop == nil {
+                Note(model.state.isConnected
+                    ? L("This laptop's receiver does not offer these controls yet; it needs a newer subscreen-rx.")
+                    : L("Available while the laptop is connected as a second screen."))
+            } else {
+                Note(L("The laptop's own brightness and volume keys keep working; changes made there show up here."))
+            }
+        }
+        .disabled(laptop == nil)
     }
 }
 

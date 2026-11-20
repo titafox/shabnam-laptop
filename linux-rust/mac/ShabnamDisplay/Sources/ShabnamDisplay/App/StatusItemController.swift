@@ -14,8 +14,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var modeItems: [(DisplayMode, NSMenuItem)] = []
     private var audioItems: [(AudioMode, NSMenuItem)] = []
 
+    // The laptop's own controls; only in the menu while its receiver offers the control channel.
+    private let laptop: LaptopControl
+    private let batteryLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let brightnessItem = NSMenuItem()
+    private let volumeItem = NSMenuItem()
+    private let muteItem = NSMenuItem(title: L("Mute Shabnam"), action: #selector(toggleMute), keyEquivalent: "")
+    private let returnItem = NSMenuItem(title: L("Return Shabnam to its own desktop"), action: #selector(returnToDesktop), keyEquivalent: "")
+    private let laptopSeparator = NSMenuItem.separator()
+    private lazy var brightnessSlider = MenuSlider(symbol: "sun.max", title: L("Shabnam brightness"), suffix: "%", target: self, action: #selector(brightnessMoved(_:)))
+    private lazy var volumeSlider = MenuSlider(symbol: "speaker.wave.2", title: L("Shabnam volume"), suffix: "", target: self, action: #selector(volumeMoved(_:)))
+
     init(session: SessionController, openSettings: @escaping (SettingsTab?) -> Void) {
         self.session = session
+        self.laptop = session.laptop
         self.openSettings = openSettings
         super.init()
 
@@ -28,6 +40,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(connectItem)
         menu.addItem(.separator())
+
+        batteryLine.isEnabled = false
+        brightnessItem.view = brightnessSlider
+        volumeItem.view = volumeSlider
+        for entry in [batteryLine, brightnessItem, volumeItem, muteItem, returnItem, laptopSeparator] { menu.addItem(entry) }
+        showLaptop(laptop.status)
 
         let sound = NSMenuItem(title: L("Sound"), action: nil, keyEquivalent: "")
         let soundMenu = NSMenu()
@@ -107,6 +125,41 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             warningLine.title = L("⚠ Accessibility permission missing (keyboard and touchpad)")
         }
     }
+
+    // MARK: the laptop's own controls
+
+    /// Battery, brightness, volume and mute as the laptop reports them; nil hides the controls.
+    /// Main thread. Also called while the menu is open, so the figures stay current.
+    func showLaptop(_ status: LaptopStatus?) {
+        let entries = [batteryLine, brightnessItem, volumeItem, muteItem, returnItem, laptopSeparator]
+        guard let status else {
+            entries.forEach { $0.isHidden = true }
+            return
+        }
+        entries.forEach { $0.isHidden = false }
+        batteryLine.isHidden = status.battery == nil
+        batteryLine.title = status.batteryDescription ?? ""
+        brightnessSlider.show(status.brightness, of: 100)
+        volumeSlider.show(status.volume, of: status.volumeSteps)
+        muteItem.state = status.muted ? .on : .off
+    }
+
+    @objc private func brightnessMoved(_ sender: NSSlider) {
+        brightnessSlider.showFigure(sender.integerValue)
+        laptop.setBrightness(sender.integerValue)
+    }
+
+    @objc private func volumeMoved(_ sender: NSSlider) {
+        volumeSlider.showFigure(sender.integerValue)
+        laptop.setVolume(sender.integerValue)
+    }
+
+    @objc private func toggleMute() {
+        guard let status = laptop.status else { return }
+        laptop.setMuted(!status.muted)
+    }
+
+    @objc private func returnToDesktop() { laptop.returnToDesktop() }
 
     // MARK: actions
 

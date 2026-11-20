@@ -6,6 +6,7 @@ import AppKit
 // Developer switches:
 //   --ui-preview [pane]      only open the Settings window: nothing is connected, no display is
 //                            created, a running copy is left alone, settings go to a scratch domain
+//     --fake-laptop          with --ui-preview: show the laptop's controls with made-up figures
 //   --probe-display-modes    create a short-lived test display and report which modes macOS accepts
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)

@@ -24,6 +24,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let preview {
             model = AppModel(session: nil)
+            model.laptopControl.onChange = { [weak self] status in self?.model.laptop = status }
+            // `--fake-laptop`: show the laptop's controls as if one were connected.
+            if CommandLine.arguments.contains("--fake-laptop") {
+                model.state = .connected(.init(framesPerSecond: 60, megabitsPerSecond: 42))
+                model.laptopControl.showFake(LaptopStatus(brightness: 63, volume: 9, volumeSteps: 16, muted: false, battery: 82, charging: true,
+                                                          externalPower: true, lidClosed: false, receiverVersion: "0.2.0", protocolVersion: 1))
+            }
             settingsWindow = SettingsWindowController(model: model)
             settingsWindow.present(preview, activate: false)
             return
@@ -42,6 +49,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = statusItem
 
         session.onStateChange = { [weak self] new in self?.stateChanged(to: new) }
+        session.laptop.onChange = { [weak self] status in
+            self?.statusItem?.showLaptop(status)
+            self?.model.laptop = status
+        }
         observeSystem()
         installSignalHandlers()
 

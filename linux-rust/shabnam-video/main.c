@@ -4,10 +4,16 @@
  * decoders otherwise); this program is the part GStreamer has no usable piece for on this machine: a Wayland
  * window that hands the decoder's NV12 dmabuf straight to the compositor.
  *
- * Why not waylandsink: the Mali driver offers NV12 only with an "implicit" modifier, and waylandsink (1.24+)
- * ignores such formats on purpose, so it would only take RGB through shared memory. Here the dmabuf is
- * attached as it is (zwp_linux_dmabuf_v1, modifier DRM_FORMAT_MOD_INVALID) — no copy, no colour conversion on
- * the CPU. Frames from software decoders are converted to BGRx and copied through wl_shm instead.
+ * Why not waylandsink: it only takes dmabufs whose format the compositor lists with an explicit modifier,
+ * and the Mali driver lists none that way; what is left is a CPU copy through shared memory.
+ *
+ * Why RGB and not the decoder's own NV12: the compositor (niri on the Mali driver) accepts an NV12 dmabuf but
+ * draws it black — it binds the image as an ordinary 2D texture, and this driver wants YUV images bound as
+ * "external" textures (niri log: "glEGLImageTargetTexture2DOES: unsupported format"). So mppvideodec is told
+ * to convert every frame to BGRx with the RGA 2D accelerator (hardware, dmabuf to dmabuf); that dmabuf is
+ * attached as it is (zwp_linux_dmabuf_v1, modifier DRM_FORMAT_MOD_INVALID). No pixel is touched by the CPU.
+ * SHABNAM_VIDEO_NV12=1 hands over the NV12 dmabuf directly, for the day the compositor can show it.
+ * Frames from software decoders are converted to BGRx on the CPU and copied through wl_shm.
  *
  * Keys: Space/K pause, Left/Right seek 10 s (Shift: 60 s), Up/Down volume, M mute, F/F11 or double click
  * fullscreen, Esc leave fullscreen, Q quit. A click pauses.
@@ -41,6 +47,7 @@
 
 #define FOURCC(a, b, c, d) ((guint32) (a) | ((guint32) (b) << 8) | ((guint32) (c) << 16) | ((guint32) (d) << 24))
 #define DRM_NV12 FOURCC ('N', 'V', '1', '2')
+#define DRM_XRGB8888 FOURCC ('X', 'R', '2', '4')
 #define MOD_INVALID_HI 0x00ffffffu
 #define MOD_INVALID_LO 0xffffffffu
 
@@ -63,7 +70,6 @@ typedef struct {
 typedef struct {
   struct wl_buffer *buffer;
   GstSample *sample;            /* keeps the decoder's dmabuf alive until the compositor lets go */
-  ShmSlot *slot;
 } Frame;
 
 static struct {
@@ -164,6 +170,14 @@ solid_buffer (guint32 argb)
   return b;
 }
 
+static void
+shm_slot_release (void *data, struct wl_buffer *buffer)
+{
+  ((ShmSlot *) data)->busy = FALSE;
+}
+
+static const struct wl_buffer_listener shm_slot_listener = { shm_slot_release };
+
 static ShmSlot *
 shm_slot_get (int width, int height)
 {
@@ -187,7 +201,10 @@ shm_slot_get (int width, int height)
   free_slot->buffer = shm_buffer_new (width, height, WL_SHM_FORMAT_XRGB8888, &free_slot->data, &free_slot->size);
   free_slot->width = width;
   free_slot->height = height;
-  return free_slot->buffer ? free_slot : NULL;
+  if (!free_slot->buffer)
+    return NULL;
+  wl_buffer_add_listener (free_slot->buffer, &shm_slot_listener, free_slot);
+  return free_slot;
 }
 
 /* ---------------------------------------------------------------- layout */
@@ -294,9 +311,7 @@ frame_free (Frame *f)
 {
   if (f->sample)
     gst_sample_unref (f->sample);
-  if (f->slot)
-    f->slot->busy = FALSE;
-  else if (f->buffer)
+  if (f->buffer)
     wl_buffer_destroy (f->buffer);
   g_free (f);
 }
@@ -367,20 +382,26 @@ show_sample (gpointer data)
   int height = meta ? (int) meta->height : GST_VIDEO_INFO_HEIGHT (&info);
   GstMemory *mem = gst_buffer_peek_memory (buf, 0);
 
-  frame = g_new0 (Frame, 1);
-  if (GST_VIDEO_INFO_FORMAT (&info) == GST_VIDEO_FORMAT_NV12 && gst_is_dmabuf_memory (mem) && app.dmabuf) {
-    /* Zero copy: both planes live in one dmabuf; the offsets and strides come from the decoder. */
+  GstVideoFormat format = GST_VIDEO_INFO_FORMAT (&info);
+  struct wl_buffer *wbuf = NULL;
+  if (gst_is_dmabuf_memory (mem) && app.dmabuf && (format == GST_VIDEO_FORMAT_BGRx || format == GST_VIDEO_FORMAT_NV12)) {
+    /* Zero copy: the planes live in one dmabuf; the offsets and strides come from the decoder. */
     int fd = gst_dmabuf_memory_get_fd (mem);
-    gsize off0 = meta ? meta->offset[0] : info.offset[0], off1 = meta ? meta->offset[1] : info.offset[1];
-    gint st0 = meta ? meta->stride[0] : info.stride[0], st1 = meta ? meta->stride[1] : info.stride[1];
+    int planes = format == GST_VIDEO_FORMAT_NV12 ? 2 : 1;
     struct zwp_linux_buffer_params_v1 *params = zwp_linux_dmabuf_v1_create_params (app.dmabuf);
-    zwp_linux_buffer_params_v1_add (params, fd, 0, mem->offset + off0, st0, MOD_INVALID_HI, MOD_INVALID_LO);
-    zwp_linux_buffer_params_v1_add (params, fd, 1, mem->offset + off1, st1, MOD_INVALID_HI, MOD_INVALID_LO);
-    frame->buffer = zwp_linux_buffer_params_v1_create_immed (params, width, height, DRM_NV12, 0);
+    for (int i = 0; i < planes; i++)
+      zwp_linux_buffer_params_v1_add (params, fd, i, mem->offset + (meta ? meta->offset[i] : info.offset[i]),
+          meta ? meta->stride[i] : info.stride[i], MOD_INVALID_HI, MOD_INVALID_LO);
+    frame = g_new0 (Frame, 1);
+    frame->buffer = wbuf = zwp_linux_buffer_params_v1_create_immed (params, width, height,
+        format == GST_VIDEO_FORMAT_NV12 ? DRM_NV12 : DRM_XRGB8888, 0);
     zwp_linux_buffer_params_v1_destroy (params);
+    if (!wbuf)
+      goto drop;
     frame->sample = gst_sample_ref (sample);
+    wl_buffer_add_listener (wbuf, &buffer_listener, frame);
     app.dma_frames++;
-  } else if (GST_VIDEO_INFO_FORMAT (&info) == GST_VIDEO_FORMAT_BGRx) {
+  } else if (format == GST_VIDEO_FORMAT_BGRx) {
     GstMapInfo map;
     ShmSlot *slot = shm_slot_get (width, height);
     if (!slot || !gst_buffer_map (buf, &map, GST_MAP_READ))
@@ -391,19 +412,16 @@ show_sample (gpointer data)
       memcpy ((guint8 *) slot->data + (gsize) y * width * 4, map.data + off + (gsize) y * stride, (gsize) width * 4);
     gst_buffer_unmap (buf, &map);
     slot->busy = TRUE;
-    frame->slot = slot;
-    frame->buffer = slot->buffer;
+    wbuf = slot->buffer;
     app.shm_frames++;
   } else {
     static gboolean warned;
     if (!warned)
-      g_printerr ("shabnam-video: cannot show %s frames\n", gst_video_format_to_string (GST_VIDEO_INFO_FORMAT (&info)));
+      g_printerr ("shabnam-video: cannot show %s frames\n", gst_video_format_to_string (format));
     warned = TRUE;
     goto drop;
   }
-  if (!frame->buffer)
-    goto drop;
-  wl_buffer_add_listener (frame->buffer, &buffer_listener, frame);
+  frame = NULL;                 /* owned by the buffer's release event from here on */
 
   int sx = crop ? (int) crop->x : 0, sy = crop ? (int) crop->y : 0;
   int sw = crop ? (int) crop->width : GST_VIDEO_INFO_WIDTH (&info), sh = crop ? (int) crop->height : GST_VIDEO_INFO_HEIGHT (&info);
@@ -419,7 +437,7 @@ show_sample (gpointer data)
   if (relayout)
     layout ();
 
-  wl_surface_attach (app.video, frame->buffer, 0, 0);
+  wl_surface_attach (app.video, wbuf, 0, 0);
   wl_surface_damage_buffer (app.video, 0, 0, width, height);
   if (app.presentation && app.stats) {
     struct wp_presentation_feedback *fb = wp_presentation_feedback (app.presentation, app.video);
@@ -906,7 +924,7 @@ build_pipeline (const char *uri)
   GstElement *vq = must_make ("queue");
   app.vconv = must_make ("videoconvert");
   app.appsink = must_make ("appsink");
-  GstCaps *caps = gst_caps_from_string ("video/x-raw(memory:DMABuf), format=NV12; video/x-raw, format=BGRx");
+  GstCaps *caps = gst_caps_from_string ("video/x-raw(memory:DMABuf), format={ BGRx, NV12 }; video/x-raw, format=BGRx");
   GstAppSinkCallbacks cb = { .new_preroll = on_new_preroll, .new_sample = on_new_sample };
   g_object_set (app.appsink, "caps", caps, "max-buffers", 2, "qos", TRUE, "max-lateness", (gint64) 20 * GST_MSECOND,
       "enable-last-sample", FALSE, NULL);
@@ -917,15 +935,23 @@ build_pipeline (const char *uri)
   gst_element_link_many (app.vconv, vq, app.appsink, NULL);
 
   /* sound */
-  GstElement *asink = gst_element_factory_make (app.headless ? "fakesink" : "pulsesink", NULL);
+  gboolean silent = app.headless && !g_getenv ("SHABNAM_VIDEO_TEST_AUDIO");
+  GstElement *asink = gst_element_factory_make (silent ? "fakesink" : "pulsesink", NULL);
   if (!asink)
     asink = gst_element_factory_make ("autoaudiosink", NULL);
   if (asink) {
     GstElement *aq = must_make ("queue"), *ares = must_make ("audioresample");
     app.aconv = must_make ("audioconvert");
     app.volume = must_make ("volume");
-    if (app.headless)
+    /* The picture follows the system clock, not the sound server's: through pipewire-pulse that clock
+     * crawls for the first seconds of a stream and can stay stopped after a seek made while paused, and the
+     * picture would crawl or freeze with it. The sound is nudged to follow the picture instead. */
+    if (g_object_class_find_property (G_OBJECT_GET_CLASS (asink), "provide-clock"))
+      g_object_set (asink, "provide-clock", FALSE, NULL);
+    if (silent)
       g_object_set (asink, "sync", TRUE, NULL);
+    else if (app.headless)
+      g_object_set (app.volume, "mute", TRUE, NULL);
     gst_bin_add_many (GST_BIN (app.pipeline), app.aconv, ares, app.volume, aq, asink, NULL);
     gst_element_link_many (app.aconv, ares, app.volume, aq, asink, NULL);
   }
@@ -1093,6 +1119,8 @@ main (int argc, char **argv)
 
   /* The hardware decoder labels its frames as dmabuf, so nothing in between tries to touch the pixels. */
   g_setenv ("GST_MPP_DEC_DMA_FEATURE", "1", TRUE);
+  if (!g_getenv ("SHABNAM_VIDEO_NV12"))
+    g_setenv ("GST_MPP_VIDEODEC_DEFAULT_FORMAT", "BGRx", TRUE);
   if (app.sw)
     g_setenv ("GST_PLUGIN_FEATURE_RANK", "mppvideodec:NONE", TRUE);
   gst_init (NULL, NULL);

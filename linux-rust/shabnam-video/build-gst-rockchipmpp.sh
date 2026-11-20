@@ -5,12 +5,15 @@
 #             libraries (gstreamer1-devel, gst-plugins-base1-devel, libdrm-devel) and, copied into it, the MPP
 #             headers (usr/include/rockchip), librockchip_mpp.so and rockchip_mpp.pc (libdir=/usr/lib) from the
 #             MPP 1.5.0 package the device runs (/opt/mpp2). usr/lib64 must be a link to usr/lib.
+#             Also librga (github.com/airockchip/librga, commit 2b32edc, api 1.10.6): include/*.h copied to
+#             usr/include/rga/, libs/Linux/gcc-aarch64/librga.so to usr/lib/, and a librga.pc next to the
+#             others. The same librga.so is installed on the device as /usr/local/lib/librga.so.
 #   WORK    = an empty scratch directory outside the repository.
 # Result: $WORK/libgstrockchipmpp.so -> install as /usr/lib/gstreamer-1.0/libgstrockchipmpp.so on the device.
 # Source: github.com/JeffyCN/mirrors, branch gstreamer-rockchip, commit bff0659 (2026-10-22), plus
 # ../patches/gstreamer-rockchip-mpp-1.5.0.patch (the JPEG decoder used an MPP call newer than 1.5.0).
-# RGA, the GPU converter, the X11 sink and kmssrc are left out: the decoder then only hands out NV12 dmabufs,
-# which is all the player wants.
+# RGA (the 2D accelerator) is compiled in: the player asks the decoder for BGRx frames, because the
+# compositor cannot show NV12 dmabufs on the Mali driver. The GPU converter, the X11 sink and kmssrc are left out.
 : "${SYSROOT:?set SYSROOT}" "${WORK:?set WORK}"
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
@@ -37,8 +40,8 @@ pkg_config_libdir = '$SYSROOT/usr/lib/pkgconfig:$SYSROOT/usr/share/pkgconfig'
 INI
 rm -rf build
 meson setup build src --cross-file cross.ini --buildtype=release \
-  -Drkximage=disabled -Dkmssrc=disabled -Drga=disabled -Dgpu=disabled -Drockchipmpp=enabled
+  -Drkximage=disabled -Dkmssrc=disabled -Drga=enabled -Dgpu=disabled -Drockchipmpp=enabled
 ninja -C build
 cp build/gst/rockchipmpp/libgstrockchipmpp.so "$WORK/libgstrockchipmpp.so"
-# The plugin finds the MPP library by itself, whatever environment GStreamer's plugin scanner runs in.
-patchelf --set-rpath /opt/mpp2/usr/lib/aarch64-linux-gnu "$WORK/libgstrockchipmpp.so"
+# The plugin finds the MPP and RGA libraries by itself, whatever environment GStreamer's plugin scanner runs in.
+patchelf --set-rpath /opt/mpp2/usr/lib/aarch64-linux-gnu:/usr/local/lib "$WORK/libgstrockchipmpp.so"

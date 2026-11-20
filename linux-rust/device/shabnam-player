@@ -7,7 +7,7 @@
 #   shabnam-player                          pick a file in the file manager first
 #
 # The picture is decoded by the RK3568's hardware decoder (GStreamer element mppvideodec, from
-# libgstrockchipmpp.so) and shown without copying by shabnam-video; see linux-rust/shabnam-video/main.c for
+# libgstrockchipmpp.so), converted by the RGA hardware and shown by shabnam-video without the CPU touching pixels; see linux-rust/shabnam-video/main.c for
 # the keys. SHABNAM_PLAYER_FLAGS="--sw" forces the software decoder, "--stats" prints frame counts.
 #
 # Who it runs as: the desktop runs as root, a program that parses files from the network must not. Like

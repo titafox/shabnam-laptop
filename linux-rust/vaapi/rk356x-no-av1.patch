@@ -1,0 +1,37 @@
+diff --git a/src/rockchip_drv_video.c b/src/rockchip_drv_video.c
+index e21b343..3ac0d76 100644
+--- a/src/rockchip_drv_video.c
++++ b/src/rockchip_drv_video.c
+@@ -584,6 +584,23 @@ static VAStatus rk_Terminate(VADriverContextP ctx) {
+     return VA_STATUS_SUCCESS;
+ }
+ 
++/* The RK3566/RK3568 video decoder has no AV1 core: offering the profile there only makes a client try it, fail at
++   vaCreateContext and fall back.  Read once from the device tree; any other SoC keeps the upstream menu. */
++static bool soc_has_no_av1(void) {
++    static int v = -1;
++    if (v < 0) {
++        char buf[256]; ssize_t n = -1;
++        int fd = open("/proc/device-tree/compatible", O_RDONLY | O_CLOEXEC);
++        if (fd >= 0) { n = read(fd, buf, sizeof(buf) - 1); close(fd); }
++        v = 0;
++        for (ssize_t k = 0; n > 0 && k < n; k += (ssize_t)strlen(buf + k) + 1) {   /* NUL-separated strings */
++            buf[n] = 0;
++            if (strstr(buf + k, "rk3568") || strstr(buf + k, "rk3566")) v = 1;
++        }
++    }
++    return v == 1;
++}
++
+ static VAStatus rk_QueryConfigProfiles(VADriverContextP ctx,
+                                        VAProfile *list, int *n) {
+     (void)ctx;
+@@ -610,7 +627,7 @@ static VAStatus rk_QueryConfigProfiles(VADriverContextP ctx,
+     }
+     /* AV1 Main (Profile 0, 8/10-bit): the driver re-serialises the OBU headers MPP needs from the VA
+        parameters (av1.c).  RKVA_HIDE_AV1=1 hides it. */
+-    if (!getenv("RKVA_HIDE_AV1"))
++    if (!getenv("RKVA_HIDE_AV1") && !soc_has_no_av1())
+         list[i++] = VAProfileAV1Profile0;
+     *n = i;
+     return VA_STATUS_SUCCESS;
